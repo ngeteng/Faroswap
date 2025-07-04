@@ -1,10 +1,7 @@
-// config.js (VERSI LENGKAP DAN BENAR)
-
-// ===================================================================================
-// PENGATURAN OTOMATISASI (UBAH DI SINI)
-// ===================================================================================
+// config.js (Hanya perbarui bagian ini)
 
 export const AUTOMATION_CONFIG = {
+    // Alur kerja baru yang lebih logis
     execution_order: ['deposit', 'swap', 'addLP'],
 
     min_delay_seconds: 10,
@@ -12,7 +9,7 @@ export const AUTOMATION_CONFIG = {
 
     deposit: {
         enabled: true,
-        amount: 0.5 // Dinaikkan sedikit untuk dana yang lebih cukup
+        amount: 0.5 
     },
 
     withdraw: {
@@ -22,12 +19,12 @@ export const AUTOMATION_CONFIG = {
 
     swap: {
         enabled: true,
-        tx_count: 2, // Akan menjalankan kedua pasangan di bawah ini secara berurutan
+        tx_count: 2, // Kita akan melakukan 2 swap untuk mendapatkan USDC
         pairs_and_amounts: [
-            // PERBAIKAN: Jumlah dinaikkan agar tidak error "amount not enough"
-            { from: 'WPHRS', to: 'USDC', amount: 0.2 }, 
-            // Setelah swap pertama sukses, Anda akan punya USDC untuk swap kedua ini
-            { from: 'USDC', to: 'WETH', amount: 10 }
+            // Langkah 1: Tukar WPHRS ke WETH (pasangan lebih likuid)
+            { from: 'WPHRS', to: 'WETH', amount: 0.2 },
+            // Langkah 2: Tukar WETH yang baru didapat ke USDC
+            { from: 'WETH', to: 'USDC', amount: 0.0005 } // sesuaikan jumlah ini dari hasil swap pertama
         ]
     },
     
@@ -35,23 +32,18 @@ export const AUTOMATION_CONFIG = {
         enabled: true,
         tx_count: 1,
         pairs_and_amounts: [
-            // Gunakan sebagian kecil dari hasil deposit dan swap
+            // Setelah kedua swap berhasil, kita seharusnya punya WPHRS dan USDC
             { tokenA: 'WPHRS', tokenB: 'USDC', amountA: 0.1 }
         ]
     },
     
     run_in_loop: {
-        enabled: false, // Set false dulu untuk testing satu siklus
+        enabled: false, // Tetap false untuk testing
         loop_delay_minutes: 60 
     }
 };
 
 
-// ===================================================================================
-// KONFIGURASI INTI (BAGIAN INI WAJIB ADA!)
-// ===================================================================================
-
-// Alamat-alamat kontrak
 export const RPC_URL = "https://testnet.dplabs-internal.com";
 export const PHRS_CONTRACT_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 export const WPHRS_CONTRACT_ADDRESS = "0x3019B247381c850ab53Dc0EE53bCe7A07Ea9155f";
