@@ -1,4 +1,66 @@
 // config.js
+
+// ===================================================================================
+// PENGATURAN OTOMATISASI (UBAH DI SINI)
+// ===================================================================================
+
+export const AUTOMATION_CONFIG = {
+    // Tentukan urutan eksekusi. Skrip akan menjalankan fungsi sesuai urutan array ini.
+    // Pilihan yang tersedia: 'deposit', 'withdraw', 'swap', 'addLP'
+    execution_order: ['deposit', 'swap', 'addLP'],
+
+    // Pengaturan delay antar setiap transaksi (bukan antar fungsi) dalam detik
+    min_delay_seconds: 10,
+    max_delay_seconds: 25,
+
+    // Pengaturan untuk Deposit (PHRS -> WPHRS)
+    deposit: {
+        enabled: true, // set false jika tidak ingin menjalankan deposit
+        amount: 0.01   // jumlah PHRS yang akan dideposit
+    },
+
+    // Pengaturan untuk Withdraw (WPHRS -> PHRS)
+    withdraw: {
+        enabled: false, // set false jika tidak ingin menjalankan withdraw
+        amount: 0.01    // jumlah WPHRS yang akan di-withdraw
+    },
+
+    // Pengaturan untuk Swap
+    swap: {
+        enabled: true,    // set false jika tidak ingin menjalankan swap
+        tx_count: 2,      // berapa kali swap akan dilakukan
+        // Tentukan pasangan token dan jumlahnya. Skrip akan memilih secara acak dari list ini.
+        pairs_and_amounts: [
+            { from: 'WPHRS', to: 'USDC', amount: 0.005 },
+            { from: 'USDC', to: 'WETH', amount: 1.5 },
+            // { from: 'WETH', to: 'WPHRS', amount: 0.0001 } // Anda bisa tambah pasangan lain
+        ]
+    },
+    
+    // Pengaturan untuk Add Liquidity
+    addLP: {
+        enabled: true,   // set false jika tidak ingin menjalankan Add LP
+        tx_count: 1,     // berapa kali Add LP akan dilakukan
+        // Tentukan pasangan token dan jumlahnya. Skrip akan memilih secara acak dari list ini.
+        pairs_and_amounts: [
+            { tokenA: 'WPHRS', tokenB: 'USDC', amountA: 0.005 },
+            { tokenA: 'WETH', tokenB: 'USDT', amountA: 0.0001 }
+        ]
+    },
+    
+    // Pengaturan jika ingin bot berjalan berulang-ulang (loop)
+    run_in_loop: {
+        enabled: false,  // set true jika ingin bot mengulang dari awal setelah selesai
+        // Jeda waktu sebelum memulai loop baru, dalam menit
+        loop_delay_minutes: 60 
+    }
+};
+
+
+// ===================================================================================
+// KONFIGURASI INTI (JANGAN DIUBAH KECUALI ANDA TAHU APA YANG DILAKUKAN)
+// ===================================================================================
+
 // Alamat-alamat kontrak
 export const RPC_URL = "https://testnet.dplabs-internal.com";
 export const PHRS_CONTRACT_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
