@@ -8,8 +8,8 @@ export const AUTOMATION_CONFIG = {
     max_delay_seconds: 25,
 
     deposit: {
-        enabled: true,
-        amount: 0.5 
+        enabled: false,
+        amount: 0.1
     },
 
     withdraw: {
