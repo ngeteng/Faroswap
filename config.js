@@ -10,7 +10,7 @@ export const AUTOMATION_CONFIG = {
     max_delay_seconds: 25,
     
     // Toleransi selip harga saat swap, dalam persen. 1 = 1%.
-    slippage_percent: 1,
+    slippage_percent: 4,
 
     deposit: {
         enabled: false,
