@@ -2,14 +2,16 @@
 import { ethers, MaxUint256 } from 'ethers';
 import axios from 'axios';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
-import { format, toDate } from 'date-fns';
+import { format } from 'date-fns';
 import { toZonedTime } from 'date-fns-tz';
 import dotenv from 'dotenv';
 
 import * as config from './config.js';
 
 dotenv.config();
+
+// Ambil konfigurasi dari config.js
+const settings = config.AUTOMATION_CONFIG;
 
 // ===================================================================================
 // UTILITIES - Fungsi-fungsi pembantu
@@ -24,8 +26,8 @@ const log = (message) => {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-const randomDelay = async (min, max) => {
-    const delay = Math.floor(Math.random() * (max - min + 1) + min) * 1000;
+const randomDelay = async () => {
+    const delay = Math.floor(Math.random() * (settings.max_delay_seconds - settings.min_delay_seconds + 1) + settings.min_delay_seconds) * 1000;
     if (delay > 0) {
         log(chalk.blue(`Menunggu ${delay / 1000} detik sebelum transaksi berikutnya...`));
         await sleep(delay);
@@ -38,8 +40,6 @@ const randomDelay = async (min, max) => {
 
 const provider = new ethers.JsonRpcProvider(config.RPC_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-
-log(`Menggunakan alamat: ${chalk.green(wallet.address)}`);
 
 async function getBalance(tokenAddress) {
     if (tokenAddress === config.PHRS_CONTRACT_ADDRESS) {
@@ -64,7 +64,7 @@ async function approveToken(tokenAddress, spenderAddress, amount) {
         log(`Approval transaction dikirim: ${chalk.yellow(tx.hash)}`);
         await tx.wait();
         log(chalk.green('Approval berhasil!'));
-        await sleep(3000); // Jeda singkat setelah approval
+        await sleep(5000); // Jeda singkat setelah approval
     } else {
         log(chalk.gray(`Approval sudah cukup untuk token ${tokenAddress}.`));
     }
@@ -119,7 +119,7 @@ async function performWithdraw(amount) {
 }
 
 async function performSwap(fromToken, toToken, amount) {
-    log(`Mempersiapkan swap dari ${fromToken.name} ke ${toToken.name}...`);
+    log(`Mempersiapkan swap ${amount} ${fromToken.name} ke ${toToken.name}...`);
     
     const { balance, decimals } = await getBalance(fromToken.address);
     const amountInSmallestUnit = ethers.parseUnits(amount.toString(), decimals);
@@ -129,7 +129,6 @@ async function performSwap(fromToken, toToken, amount) {
         return;
     }
 
-    // 1. Dapatkan rute dari Dodo API
     const url = `https://api.dodoex.io/route-service/v2/widget/getdodoroute?chainId=688688&deadLine=${Math.floor(Date.now() / 1000) + 300}&apikey=a37546505892e1a952&slippage=1&fromTokenAddress=${fromToken.address}&toTokenAddress=${toToken.address}&userAddr=${wallet.address}&estimateGas=true&fromAmount=${amountInSmallestUnit}`;
     
     let route;
@@ -145,18 +144,16 @@ async function performSwap(fromToken, toToken, amount) {
         return;
     }
 
-    // 2. Approve token jika bukan token native (PHRS)
     if (fromToken.address !== config.PHRS_CONTRACT_ADDRESS) {
         await approveToken(fromToken.address, route.to, amountInSmallestUnit);
     }
     
-    // 3. Kirim transaksi swap
     const txData = {
         to: route.to,
         data: route.data,
         value: route.value,
-        gasLimit: BigInt(route.gasLimit) + BigInt(50000), // Tambah buffer gas
-        gasPrice: ethers.parseUnits('1', 'gwei') // Sesuaikan jika perlu
+        gasLimit: BigInt(route.gasLimit) + BigInt(50000),
+        gasPrice: ethers.parseUnits('1', 'gwei')
     };
 
     try {
@@ -170,7 +167,7 @@ async function performSwap(fromToken, toToken, amount) {
 }
 
 async function performAddLiquidity(tokenA, tokenB, amountA) {
-    log(`Mempersiapkan penambahan likuiditas untuk ${tokenA.name} dan ${tokenB.name}...`);
+    log(`Mempersiapkan penambahan likuiditas untuk ${amountA} ${tokenA.name} dan ${tokenB.name}...`);
     
     const { balance: balanceA, decimals: decimalsA } = await getBalance(tokenA.address);
     const amountAInSmallestUnit = ethers.parseUnits(amountA.toString(), decimalsA);
@@ -180,7 +177,6 @@ async function performAddLiquidity(tokenA, tokenB, amountA) {
         return;
     }
     
-    // 1. Dapatkan jumlah token B yang dibutuhkan
     const poolRouter = new ethers.Contract(config.POOL_ROUTER_ADDRESS, config.UNISWAP_V2_ABI, provider);
     const amountsOut = await poolRouter.getAmountsOut(amountAInSmallestUnit, [tokenA.address, tokenB.address], [30]);
     const amountBInSmallestUnit = amountsOut[1];
@@ -192,28 +188,21 @@ async function performAddLiquidity(tokenA, tokenB, amountA) {
     }
     log(`Dibutuhkan ${ethers.formatUnits(amountBInSmallestUnit, decimalsB)} ${tokenB.name} untuk likuiditas.`);
 
-    // 2. Approve kedua token
     await approveToken(tokenA.address, config.POOL_ROUTER_ADDRESS, amountAInSmallestUnit);
     await approveToken(tokenB.address, config.POOL_ROUTER_ADDRESS, amountBInSmallestUnit);
 
-    // 3. Tambahkan likuiditas
     const lpContract = new ethers.Contract(config.POOL_ROUTER_ADDRESS, config.UNISWAP_V2_ABI, wallet);
-    const deadline = Math.floor(Date.now() / 1000) + 600; // 10 menit dari sekarang
-    const slippage = 0.5; // 0.5%
+    const deadline = Math.floor(Date.now() / 1000) + 600;
+    const slippage = 0.5;
     const amountAMin = amountAInSmallestUnit - (amountAInSmallestUnit * BigInt(slippage * 100)) / BigInt(10000);
     const amountBMin = amountBInSmallestUnit - (amountBInSmallestUnit * BigInt(slippage * 100)) / BigInt(10000);
 
     try {
         const tx = await lpContract.addLiquidity(
-            tokenA.address,
-            tokenB.address,
-            30,
-            amountAInSmallestUnit,
-            amountBInSmallestUnit,
-            amountAMin,
-            amountBMin,
-            wallet.address,
-            deadline
+            tokenA.address, tokenB.address, 30,
+            amountAInSmallestUnit, amountBInSmallestUnit,
+            amountAMin, amountBMin,
+            wallet.address, deadline
         );
         log(`Add Liquidity transaction dikirim: ${chalk.yellow(tx.hash)}`);
         const receipt = await tx.wait();
@@ -223,95 +212,91 @@ async function performAddLiquidity(tokenA, tokenB, amountA) {
     }
 }
 
+
 // ===================================================================================
-// MAIN MENU & EXECUTION
+// MAIN EXECUTION LOGIC
 // ===================================================================================
 
-async function main() {
-    console.log(chalk.bold.green('=== Faroswap Auto BOT (Node.js Version) ==='));
-
-    const { action } = await inquirer.prompt([
-        {
-            type: 'list',
-            name: 'action',
-            message: 'Pilih aksi yang ingin dijalankan:',
-            choices: [
-                { name: 'Auto Deposit (PHRS -> WPHRS)', value: 'deposit' },
-                { name: 'Auto Withdraw (WPHRS -> PHRS)', value: 'withdraw' },
-                { name: 'Auto Swap', value: 'swap' },
-                { name: 'Auto Add Liquidity', value: 'addLP' },
-                new inquirer.Separator(),
-                { name: 'Keluar', value: 'exit' },
-            ],
-        },
-    ]);
-
-    if (action === 'exit') {
-        log('Terima kasih!');
-        return;
-    }
-
-    if (action === 'deposit') {
-        const { amount } = await inquirer.prompt([{ type: 'number', name: 'amount', message: 'Masukkan jumlah PHRS untuk di-deposit:' }]);
-        await performDeposit(amount);
-    }
-
-    if (action === 'withdraw') {
-        const { amount } = await inquirer.prompt([{ type: 'number', name: 'amount', message: 'Masukkan jumlah WPHRS untuk di-withdraw:' }]);
-        await performWithdraw(amount);
-    }
+async function runBot() {
+    log(chalk.bold.green('Memulai eksekusi bot otomatis...'));
+    log(`Menggunakan alamat: ${chalk.green(wallet.address)}`);
     
-    if (action === 'swap') {
-        const { txCount, minDelay, maxDelay } = await inquirer.prompt([
-            { type: 'number', name: 'txCount', message: 'Berapa kali swap?' },
-            { type: 'number', name: 'minDelay', message: 'Delay minimum antar transaksi (detik):', default: 5 },
-            { type: 'number', name: 'maxDelay', message: 'Delay maksimum antar transaksi (detik):', default: 15 }
-        ]);
-        
-        for (let i = 0; i < txCount; i++) {
-            log(chalk.magenta(`--- Menjalankan Swap ke-${i + 1} dari ${txCount} ---`));
-            const availableTickers = Object.keys(config.tickers);
-            const { fromTickerName } = await inquirer.prompt([{ type: 'list', name: 'fromTickerName', message: 'Swap DARI token:', choices: availableTickers }]);
-            const toTickerChoices = availableTickers.filter(t => t !== fromTickerName);
-            const { toTickerName } = await inquirer.prompt([{ type: 'list', name: 'toTickerName', message: 'Swap KE token:', choices: toTickerChoices }]);
-            const { amount } = await inquirer.prompt([{ type: 'number', name: 'amount', message: `Jumlah ${fromTickerName} yang akan di-swap:` }]);
+    for (const task of settings.execution_order) {
+        log(chalk.bold.magenta(`\n--- Menjalankan Tugas: ${task.toUpperCase()} ---`));
+
+        switch (task) {
+            case 'deposit':
+                if (settings.deposit.enabled) {
+                    await performDeposit(settings.deposit.amount);
+                } else {
+                    log(chalk.yellow('Deposit dinonaktifkan, dilewati.'));
+                }
+                break;
             
-            const fromToken = { name: fromTickerName, address: config.tickers[fromTickerName] };
-            const toToken = { name: toTickerName, address: config.tickers[toTickerName] };
+            case 'withdraw':
+                if (settings.withdraw.enabled) {
+                    await performWithdraw(settings.withdraw.amount);
+                } else {
+                    log(chalk.yellow('Withdraw dinonaktifkan, dilewati.'));
+                }
+                break;
+
+            case 'swap':
+                if (settings.swap.enabled) {
+                    for (let i = 0; i < settings.swap.tx_count; i++) {
+                        log(chalk.blue(`Melakukan swap ke-${i + 1} dari ${settings.swap.tx_count}...`));
+                        const pair = settings.swap.pairs_and_amounts[Math.floor(Math.random() * settings.swap.pairs_and_amounts.length)];
+                        
+                        const fromToken = { name: pair.from, address: config.tickers[pair.from] };
+                        const toToken = { name: pair.to, address: config.tickers[pair.to] };
+
+                        await performSwap(fromToken, toToken, pair.amount);
+                        if (i < settings.swap.tx_count - 1) await randomDelay();
+                    }
+                } else {
+                    log(chalk.yellow('Swap dinonaktifkan, dilewati.'));
+                }
+                break;
             
-            await performSwap(fromToken, toToken, amount);
-            if (i < txCount - 1) await randomDelay(minDelay, maxDelay);
+            case 'addLP':
+                if (settings.addLP.enabled) {
+                    for (let i = 0; i < settings.addLP.tx_count; i++) {
+                        log(chalk.blue(`Melakukan Add LP ke-${i + 1} dari ${settings.addLP.tx_count}...`));
+                        const pair = settings.addLP.pairs_and_amounts[Math.floor(Math.random() * settings.addLP.pairs_and_amounts.length)];
+                        
+                        const tokenA = { name: pair.tokenA, address: config.tickers[pair.tokenA] };
+                        const tokenB = { name: pair.tokenB, address: config.tickers[pair.tokenB] };
+
+                        await performAddLiquidity(tokenA, tokenB, pair.amountA);
+                        if (i < settings.addLP.tx_count - 1) await randomDelay();
+                    }
+                } else {
+                    log(chalk.yellow('Add LP dinonaktifkan, dilewati.'));
+                }
+                break;
+
+            default:
+                log(chalk.red(`Tugas tidak dikenal: ${task}`));
         }
     }
-    
-    if (action === 'addLP') {
-        const { txCount, minDelay, maxDelay } = await inquirer.prompt([
-            { type: 'number', name: 'txCount', message: 'Berapa kali tambah likuiditas?' },
-            { type: 'number', name: 'minDelay', message: 'Delay minimum antar transaksi (detik):', default: 5 },
-            { type: 'number', name: 'maxDelay', message: 'Delay maksimum antar transaksi (detik):', default: 15 }
-        ]);
-
-        for (let i = 0; i < txCount; i++) {
-             log(chalk.magenta(`--- Menjalankan Add LP ke-${i + 1} dari ${txCount} ---`));
-             const availableTickers = Object.keys(config.tickers).filter(t => t !== 'PHRS'); // Tidak bisa LP dengan PHRS
-             const { tokenAName } = await inquirer.prompt([{ type: 'list', name: 'tokenAName', message: 'Pilih token PERTAMA untuk LP:', choices: availableTickers }]);
-             const tokenBChoices = availableTickers.filter(t => t !== tokenAName);
-             const { tokenBName } = await inquirer.prompt([{ type: 'list', name: 'tokenBName', message: 'Pilih token KEDUA untuk LP:', choices: tokenBChoices }]);
-             const { amount } = await inquirer.prompt([{ type: 'number', name: 'amount', message: `Jumlah ${tokenAName} yang akan ditambahkan:` }]);
-             
-             const tokenA = { name: tokenAName, address: config.tickers[tokenAName] };
-             const tokenB = { name: tokenBName, address: config.tickers[tokenBName] };
-             
-             await performAddLiquidity(tokenA, tokenB, amount);
-             if (i < txCount - 1) await randomDelay(minDelay, maxDelay);
-        }
-    }
-
-    log(chalk.bold.green('=== Selesai ==='));
 }
 
 
-main().catch(err => {
-    console.error(chalk.red.bold('Terjadi error fatal:'), err);
-    process.exit(1);
-});
+async function start() {
+    while (true) {
+        await runBot().catch(err => {
+            console.error(chalk.red.bold('Terjadi error fatal pada eksekusi bot:'), err);
+        });
+
+        if (settings.run_in_loop.enabled) {
+            const delayMinutes = settings.run_in_loop.loop_delay_minutes;
+            log(chalk.bold.green(`\n=== Siklus selesai. Bot akan berjalan lagi dalam ${delayMinutes} menit. ===`));
+            await sleep(delayMinutes * 60 * 1000);
+        } else {
+            log(chalk.bold.green('\n=== Semua tugas selesai. Bot berhenti. ==='));
+            break; // Keluar dari loop while
+        }
+    }
+}
+
+start();
