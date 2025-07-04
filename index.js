@@ -1,4 +1,4 @@
-// index.js
+// index.js (VERSI DIPERBAIKI)
 import { ethers, MaxUint256 } from 'ethers';
 import axios from 'axios';
 import chalk from 'chalk';
@@ -10,13 +10,9 @@ import * as config from './config.js';
 
 dotenv.config();
 
-// Ambil konfigurasi dari config.js
 const settings = config.AUTOMATION_CONFIG;
 
-// ===================================================================================
-// UTILITIES - Fungsi-fungsi pembantu
-// ===================================================================================
-
+// ... (Bagian UTILITIES dan BLOCKCHAIN INTERACTIONS tetap sama) ...
 const log = (message) => {
     const timeZone = 'Asia/Jakarta';
     const zonedDate = toZonedTime(new Date(), timeZone);
@@ -33,10 +29,6 @@ const randomDelay = async () => {
         await sleep(delay);
     }
 };
-
-// ===================================================================================
-// BLOCKCHAIN INTERACTIONS - Fungsi-fungsi interaksi ke blockchain
-// ===================================================================================
 
 const provider = new ethers.JsonRpcProvider(config.RPC_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
@@ -64,16 +56,13 @@ async function approveToken(tokenAddress, spenderAddress, amount) {
         log(`Approval transaction dikirim: ${chalk.yellow(tx.hash)}`);
         await tx.wait();
         log(chalk.green('Approval berhasil!'));
-        await sleep(5000); // Jeda singkat setelah approval
+        await sleep(5000);
     } else {
         log(chalk.gray(`Approval sudah cukup untuk token ${tokenAddress}.`));
     }
 }
 
-// ===================================================================================
-// CORE FUNCTIONS - Fungsi inti (Deposit, Withdraw, Swap, Add LP)
-// ===================================================================================
-
+// ... (Fungsi CORE: performDeposit, performWithdraw, performSwap, performAddLiquidity tetap sama) ...
 async function performDeposit(amount) {
     const wphrsContract = new ethers.Contract(config.WPHRS_CONTRACT_ADDRESS, config.ERC20_ABI, wallet);
     const amountInWei = ethers.parseEther(amount.toString());
@@ -214,7 +203,7 @@ async function performAddLiquidity(tokenA, tokenB, amountA) {
 
 
 // ===================================================================================
-// MAIN EXECUTION LOGIC
+// MAIN EXECUTION LOGIC - VERSI DIPERBAIKI
 // ===================================================================================
 
 async function runBot() {
@@ -243,15 +232,17 @@ async function runBot() {
 
             case 'swap':
                 if (settings.swap.enabled) {
-                    for (let i = 0; i < settings.swap.tx_count; i++) {
-                        log(chalk.blue(`Melakukan swap ke-${i + 1} dari ${settings.swap.tx_count}...`));
-                        const pair = settings.swap.pairs_and_amounts[Math.floor(Math.random() * settings.swap.pairs_and_amounts.length)];
+                    const totalSwaps = Math.min(settings.swap.tx_count, settings.swap.pairs_and_amounts.length);
+                    for (let i = 0; i < totalSwaps; i++) {
+                        log(chalk.blue(`Melakukan swap ke-${i + 1} dari ${totalSwaps}...`));
+                        // PERBAIKAN: Mengambil pasangan secara berurutan, bukan acak
+                        const pair = settings.swap.pairs_and_amounts[i];
                         
                         const fromToken = { name: pair.from, address: config.tickers[pair.from] };
                         const toToken = { name: pair.to, address: config.tickers[pair.to] };
 
                         await performSwap(fromToken, toToken, pair.amount);
-                        if (i < settings.swap.tx_count - 1) await randomDelay();
+                        if (i < totalSwaps - 1) await randomDelay();
                     }
                 } else {
                     log(chalk.yellow('Swap dinonaktifkan, dilewati.'));
@@ -260,15 +251,17 @@ async function runBot() {
             
             case 'addLP':
                 if (settings.addLP.enabled) {
-                    for (let i = 0; i < settings.addLP.tx_count; i++) {
-                        log(chalk.blue(`Melakukan Add LP ke-${i + 1} dari ${settings.addLP.tx_count}...`));
-                        const pair = settings.addLP.pairs_and_amounts[Math.floor(Math.random() * settings.addLP.pairs_and_amounts.length)];
+                    const totalLPs = Math.min(settings.addLP.tx_count, settings.addLP.pairs_and_amounts.length);
+                    for (let i = 0; i < totalLPs; i++) {
+                        log(chalk.blue(`Melakukan Add LP ke-${i + 1} dari ${totalLPs}...`));
+                        // PERBAIKAN: Mengambil pasangan secara berurutan, bukan acak
+                        const pair = settings.addLP.pairs_and_amounts[i];
                         
                         const tokenA = { name: pair.tokenA, address: config.tickers[pair.tokenA] };
                         const tokenB = { name: pair.tokenB, address: config.tickers[pair.tokenB] };
 
                         await performAddLiquidity(tokenA, tokenB, pair.amountA);
-                        if (i < settings.addLP.tx_count - 1) await randomDelay();
+                        if (i < totalLPs - 1) await randomDelay();
                     }
                 } else {
                     log(chalk.yellow('Add LP dinonaktifkan, dilewati.'));
@@ -294,7 +287,7 @@ async function start() {
             await sleep(delayMinutes * 60 * 1000);
         } else {
             log(chalk.bold.green('\n=== Semua tugas selesai. Bot berhenti. ==='));
-            break; // Keluar dari loop while
+            break; 
         }
     }
 }
