@@ -8,12 +8,12 @@ export const AUTOMATION_CONFIG = {
 
     deposit: {
         enabled: true,
-        amount: 0.1 // Dinaikkan sedikit untuk dana yang lebih cukup
+        amount: 0.5 // Dinaikkan sedikit untuk dana yang lebih cukup
     },
 
     withdraw: {
         enabled: false,
-        amount: 0.1
+        amount: 0.2
     },
 
     swap: {
