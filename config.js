@@ -5,8 +5,8 @@
 // ===================================================================================
 
 export const AUTOMATION_CONFIG = {
-    // Tentukan urutan eksekusi. Skrip akan menjalankan fungsi sesuai urutan array ini.
-    // Pilihan yang tersedia: 'deposit', 'withdraw', 'swap', 'addLP'
+    // Tentukan urutan eksekusi.
+    // Contoh alur logis: deposit dulu, lalu swap dari hasil deposit, baru tambah LP.
     execution_order: ['deposit', 'swap', 'addLP'],
 
     // Pengaturan delay antar setiap transaksi (bukan antar fungsi) dalam detik
@@ -15,43 +15,42 @@ export const AUTOMATION_CONFIG = {
 
     // Pengaturan untuk Deposit (PHRS -> WPHRS)
     deposit: {
-        enabled: true, // set false jika tidak ingin menjalankan deposit
-        amount: 0.01   // jumlah PHRS yang akan dideposit
+        enabled: true,
+        amount: 0.01
     },
 
     // Pengaturan untuk Withdraw (WPHRS -> PHRS)
     withdraw: {
-        enabled: false, // set false jika tidak ingin menjalankan withdraw
-        amount: 0.01    // jumlah WPHRS yang akan di-withdraw
+        enabled: false,
+        amount: 0.01
     },
 
     // Pengaturan untuk Swap
     swap: {
-        enabled: true,    // set false jika tidak ingin menjalankan swap
-        tx_count: 2,      // berapa kali swap akan dilakukan
-        // Tentukan pasangan token dan jumlahnya. Skrip akan memilih secara acak dari list ini.
+        enabled: true,
+        tx_count: 2,
+        // ALUR LOGIS: Swap pertama harus dari WPHRS (hasil deposit) untuk mendapatkan token lain.
+        // Swap kedua bisa menggunakan token hasil swap pertama.
         pairs_and_amounts: [
-            { from: 'WPHRS', to: 'USDC', amount: 0.005 },
-            { from: 'USDC', to: 'WETH', amount: 1.5 },
-            // { from: 'WETH', to: 'WPHRS', amount: 0.0001 } // Anda bisa tambah pasangan lain
+            { from: 'WPHRS', to: 'USDC', amount: 0.005 }, // Ini akan memberi Anda saldo USDC
+            { from: 'USDC', to: 'WETH', amount: 1 }      // Baru Anda bisa memakai USDC itu
         ]
     },
     
     // Pengaturan untuk Add Liquidity
     addLP: {
-        enabled: true,   // set false jika tidak ingin menjalankan Add LP
-        tx_count: 1,     // berapa kali Add LP akan dilakukan
-        // Tentukan pasangan token dan jumlahnya. Skrip akan memilih secara acak dari list ini.
+        enabled: true,
+        tx_count: 1,
+        // Pastikan Anda memiliki saldo untuk kedua token ini.
+        // Contoh ini mengasumsikan Anda sudah punya WPHRS dan USDC dari swap di atas.
         pairs_and_amounts: [
-            { tokenA: 'WPHRS', tokenB: 'USDC', amountA: 0.005 },
-            { tokenA: 'WETH', tokenB: 'USDT', amountA: 0.0001 }
+            { tokenA: 'WPHRS', tokenB: 'USDC', amountA: 0.002 }
         ]
     },
     
     // Pengaturan jika ingin bot berjalan berulang-ulang (loop)
     run_in_loop: {
-        enabled: false,  // set true jika ingin bot mengulang dari awal setelah selesai
-        // Jeda waktu sebelum memulai loop baru, dalam menit
+        enabled: false,
         loop_delay_minutes: 60 
     }
 };
@@ -82,11 +81,11 @@ export const tickers = {
     WBTC: WBTC_CONTRACT_ADDRESS,
 };
 
-// Application Binary Interface (ABI) yang dibutuhkan
+// Application Binary Interface (ABI) yang dibutuhkan - VERSI DIPERBAIKI
 export const ERC20_ABI = [
     "function balanceOf(address owner) view returns (uint256)",
     "function decimals() view returns (uint8)",
-    "function approve(address spender, uint256 amount) nonpayable returns (bool)",
+    "function approve(address spender, uint256 amount) returns (bool)", // nonpayable dihapus
     "function allowance(address owner, address spender) view returns (uint256)",
     "function deposit() payable",
     "function withdraw(uint256 wad)"
@@ -94,5 +93,6 @@ export const ERC20_ABI = [
 
 export const UNISWAP_V2_ABI = [
     "function getAmountsOut(uint256 amountIn, address[] memory path, uint256[] memory fees) view returns (uint256[] memory amounts)",
-    "function addLiquidity(address tokenA, address tokenB, uint256 fee, uint256 amountADesired, uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) nonpayable returns (uint256, uint256, uint256)"
+    // nonpayable dihapus
+    "function addLiquidity(address tokenA, address tokenB, uint256 fee, uint256 amountADesired, uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) returns (uint256, uint256, uint256)"
 ];
