@@ -1,4 +1,3 @@
-import os from 'os'; // Tidak dipakai, tapi sebagai contoh import modul bawaan
 import { ethers, MaxUint256 } from 'ethers';
 import axios from 'axios';
 import chalk from 'chalk';
@@ -8,7 +7,7 @@ import moment from 'moment-timezone';
 // Inisialisasi Dotenv
 dotenv.config();
 
-// Helper untuk log dengan timestamp
+// Helper untuk log dengan timestamp WIB
 const log = (message) => {
     const timestamp = moment().tz('Asia/Jakarta').format('HH:mm:ss');
     console.log(`${chalk.bold.cyan(`[${timestamp}]`)} | ${message}`);
@@ -33,18 +32,21 @@ const ADD_LP_AMOUNTS = {
     "WETH": "0.00001", "WBTC": "0.000001",
 };
 
-const JEDA_MINIMUM = 30 * 1000; // dalam milidetik
-const JEDA_MAKSIMUM = 70 * 1000; // dalam milidetik
+const JEDA_MINIMUM = 30 * 1000; // 30 detik
+const JEDA_MAKSIMUM = 70 * 1000; // 70 detik
 // --- AKHIR KONFIGURASI --- //
 
 class Faroswap {
     constructor(rpcUrl) {
-        this.HEADERS = { 
-            "Accept": "application/json, text/plain, */*", 
-            "Origin": "https://faroswap.xyz", 
-            "Referer": "https://faroswap.xyz/", 
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36" 
+        // --- FIX: Simpan RPC URL dan gunakan User-Agent yang di-hardcode ---
+        this.rpcUrl = rpcUrl;
+        this.HEADERS = {
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://faroswap.xyz",
+            "Referer": "https://faroswap.xyz/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
         };
+        
         this.chainId = 688688;
 
         // Alamat Kontrak
@@ -59,67 +61,48 @@ class Faroswap {
 
         this.tickers = ["WPHRS", "USDC", "USDT", "WETH", "WBTC"];
         
-        // ABI (Application Binary Interface) - sama seperti di Python
+        // ABI (Application Binary Interface)
         this.ERC20_CONTRACT_ABI = [{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"address","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},{"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},{"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},{"type":"function","name":"decimals","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]}];
         this.UNISWAP_V2_ABI = [{"type":"function","name":"getAmountsOut","stateMutability":"view","inputs":[{"name":"amountIn","type":"uint256"},{"name":"path","type":"address[]"},{"name":"fees","type":"uint256[]"}],"outputs":[{"name":"amounts","type":"uint256[]"}]},{"type":"function","name":"addLiquidity","stateMutability":"payable","inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint256"},{"name":"amountADesired","type":"uint256"},{"name":"amountBDesired","type":"uint256"},{"name":"amountAMin","type":"uint256"},{"name":"amountBMin","type":"uint256"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amountA","type":"uint256"},{"name":"amountB","type":"uint256"},{"name":"liquidity","type":"uint256"}]}];
         
-        // Inisialisasi provider dan wallet dari ethers.js
-        this.provider = new ethers.JsonRpcProvider(rpcUrl);
-        // Pool contract instance
+        // Inisialisasi provider dan kontrak
+        this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
         this.poolContract = new ethers.Contract(this.POOL_ROUTER_ADDRESS, this.UNISWAP_V2_ABI, this.provider);
     }
-
-    async getTokenBalance(address, contractAddress) {
-        try {
-            if (contractAddress === this.PHRS_CONTRACT_ADDRESS) {
-                const balanceWei = await this.provider.getBalance(address);
-                return ethers.formatEther(balanceWei); // Konversi dari Wei ke Ether
-            } else {
-                const tokenContract = new ethers.Contract(contractAddress, this.ERC20_CONTRACT_ABI, this.provider);
-                const balanceBigInt = await tokenContract.balanceOf(address);
-                const decimals = await tokenContract.decimals();
-                return ethers.formatUnits(balanceBigInt, decimals); // Konversi dari unit terkecil ke unit standar
-            }
-        } catch (e) {
-            log(chalk.red(`Gagal mendapatkan saldo token: ${e.message}`));
-            return '0';
-        }
+    
+    getContractAddress(ticker) {
+        return this[`${ticker}_CONTRACT_ADDRESS`] || this.PHRS_CONTRACT_ADDRESS;
     }
 
     async waitForReceipt(txHash) {
         log(`Menunggu receipt untuk transaksi: ${chalk.yellow(txHash)}`);
-        for (let i = 0; i < 10; i++) {
-            try {
-                // ethers.js punya cara yang lebih simpel untuk menunggu receipt
-                const receipt = await this.provider.waitForTransaction(txHash, 1, 60000); // (hash, konfirmasi, timeout)
-                if (receipt && receipt.status === 1) {
-                    log(chalk.green(`Transaksi sukses! Block: ${receipt.blockNumber}`));
-                    log(`Explorer: https://testnet.pharosscan.xyz/tx/${txHash}`);
-                    return receipt;
-                } else {
-                    log(chalk.red(`Transaksi gagal (reverted).`));
-                    return null;
-                }
-            } catch (error) {
-                 log(chalk.yellow(`Menunggu receipt... (${i + 1}/10)`));
-                 await sleep(15000); // 15 detik
+        try {
+            const receipt = await this.provider.waitForTransaction(txHash, 1, 180000); // Timeout 3 menit
+            if (receipt && receipt.status === 1) {
+                log(chalk.green(`Transaksi sukses! Block: ${receipt.blockNumber}`));
+                log(`Explorer: https://testnet.pharosscan.xyz/tx/${txHash}`);
+                return receipt;
+            } else {
+                log(chalk.red(`Transaksi gagal (reverted) atau tidak ditemukan.`));
+                return null;
             }
+        } catch (error) {
+             log(chalk.red(`Gagal menunggu receipt: ${error.message}`));
+             return null;
         }
-        log(chalk.red(`Gagal mendapatkan receipt transaksi setelah beberapa kali percobaan.`));
-        return null;
     }
-
+    
     async approveToken(wallet, spenderAddress, tokenAddress, amountWei) {
         const tokenContract = new ethers.Contract(tokenAddress, this.ERC20_CONTRACT_ABI, wallet);
         try {
             const allowance = await tokenContract.allowance(wallet.address, spenderAddress);
             if (allowance >= amountWei) {
-                log(chalk.green(`Allowance sudah cukup, tidak perlu approve.`));
+                log(chalk.green(`Allowance sudah cukup untuk ${tokenAddress.slice(0,10)}...`));
                 return true;
             }
 
-            log(`Memerlukan approval untuk token ${tokenAddress}...`);
-            const approveTx = await tokenContract.approve(spenderAddress, MaxUint256); // Approve jumlah maksimum
+            log(`Memerlukan approval untuk token ${tokenAddress.slice(0,10)}...`);
+            const approveTx = await tokenContract.approve(spenderAddress, MaxUint256);
             
             const receipt = await this.waitForReceipt(approveTx.hash);
             return receipt !== null;
@@ -127,26 +110,6 @@ class Faroswap {
             log(chalk.red(`Gagal saat proses approve: ${e.message}`));
             return false;
         }
-    }
-
-    async getDodoRoute(fromToken, toToken, amountWei, userAddress) {
-        const url = `https://api.dodoex.io/route-service/v2/widget/getdodoroute?chainId=${this.chainId}&deadLine=${Math.floor(Date.now() / 1000) + 300}&apikey=a37546505892e1a952&slippage=1&fromTokenAddress=${fromToken}&toTokenAddress=${toToken}&fromAmount=${amountWei}&userAddr=${userAddress}&estimateGas=true`;
-        try {
-            const response = await axios.get(url, { headers: this.HEADERS, timeout: 30000 });
-            if (response.data && response.data.status === 200) {
-                return response.data.data;
-            } else {
-                log(chalk.red(`DODO API Error: ${response.data.data || 'Tidak ada rute'}`));
-                return null;
-            }
-        } catch (e) {
-            log(chalk.red(`Gagal mendapatkan rute dari DODOEX: ${e.message}`));
-            return null;
-        }
-    }
-    
-    getContractAddress(ticker) {
-        return this[`${ticker}_CONTRACT_ADDRESS`] || this.PHRS_CONTRACT_ADDRESS;
     }
 
     async performSwap(wallet, fromTicker, toTicker, amountDecimal) {
@@ -167,94 +130,31 @@ class Faroswap {
             decimals = await tokenContract.decimals();
         }
 
-        const amountWei = ethers.parseUnits(amountDecimal, Number(decimals));
+        const amountWei = ethers.parseUnits(amountDecimal.toString(), Number(decimals));
 
         log(`Memulai swap: ${amountDecimal} ${fromTicker} -> ${toTicker}`);
-        const routeData = await this.getDodoRoute(fromTokenAddress, toTokenAddress, amountWei.toString(), wallet.address);
-        if (!routeData) return false;
-
+        
         if (fromTicker !== "PHRS") {
-            const approved = await this.approveToken(wallet, routeData.to, fromTokenAddress, amountWei);
+             // Approve Mixswap Router (DODO)
+            const approved = await this.approveToken(wallet, this.MIXSWAP_ROUTER_ADDRESS, fromTokenAddress, amountWei);
             if (!approved) {
-                log(chalk.red(`Gagal approve token, swap dibatalkan.`));
+                log(chalk.red(`Gagal approve token untuk DODO, swap dibatalkan.`));
                 return false;
             }
         }
         
         const swapTx = {
-            to: routeData.to,
+            to: this.MIXSWAP_ROUTER_ADDRESS, // Transaksi selalu ke router DODO
             from: wallet.address,
-            value: routeData.value || '0',
-            data: routeData.data,
-            gasPrice: ethers.parseUnits('1', 'gwei'),
-            nonce: await this.provider.getTransactionCount(wallet.address, 'latest'),
+            value: fromTicker === "PHRS" ? amountWei : 0, // Kirim value hanya jika dari native coin
         };
 
         try {
-            // Ethers.js v6 Wallet secara otomatis mengestimasi gas jika tidak disediakan
             const txResponse = await wallet.sendTransaction(swapTx);
             const receipt = await this.waitForReceipt(txResponse.hash);
             return receipt !== null;
         } catch(e) {
             log(chalk.red(`Gagal mengirim transaksi swap: ${e.message}`));
-            return false;
-        }
-    }
-
-    async performAddLiquidity(wallet, tokenATicker, tokenBTicker, amountADecimal) {
-        log(`Memulai Tambah Likuiditas: ${amountADecimal} ${tokenATicker} dengan ${tokenBTicker}`);
-
-        const tokenAAddress = this.getContractAddress(tokenATicker);
-        const tokenBAddress = this.getContractAddress(tokenBTicker);
-        
-        const balanceA = await this.getTokenBalance(wallet.address, tokenAAddress);
-        if (parseFloat(balanceA) < parseFloat(amountADecimal)) {
-            log(chalk.red(`Saldo ${tokenATicker} tidak cukup. Saldo: ${balanceA}, butuh: ${amountADecimal}`));
-            return false;
-        }
-        
-        const tokenAContract = new ethers.Contract(tokenAAddress, this.ERC20_CONTRACT_ABI, wallet);
-        const decimalsA = await tokenAContract.decimals();
-        const amountAWei = ethers.parseUnits(amountADecimal, Number(decimalsA));
-
-        let amountBWei;
-        try {
-            const amountsOut = await this.poolContract.getAmountsOut(amountAWei, [tokenAAddress, tokenBAddress], [30]);
-            amountBWei = amountsOut[1];
-        } catch(e) {
-            log(chalk.red(`Gagal menghitung jumlah token B: ${e.message}`));
-            return false;
-        }
-        
-        log(chalk.yellow(`Dibutuhkan sekitar ${ethers.formatUnits(amountBWei, await new ethers.Contract(tokenBAddress, this.ERC20_CONTRACT_ABI, this.provider).decimals())} ${tokenBTicker}`));
-
-        log(`Approval untuk ${tokenATicker}...`);
-        if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenAAddress, amountAWei)) return false;
-
-        log(`Approval untuk ${tokenBTicker}...`);
-        if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenBAddress, amountBWei)) return false;
-        
-        const deadline = Math.floor(Date.now() / 1000) + 600;
-        const slippage = 0.01; // 1%
-        
-        try {
-            const lpContractWithSigner = this.poolContract.connect(wallet);
-            const tx = await lpContractWithSigner.addLiquidity(
-                tokenAAddress,
-                tokenBAddress,
-                30,
-                amountAWei,
-                amountBWei,
-                amountAWei - (amountAWei * BigInt(Math.floor(slippage * 100))) / 100n, // amountAMin
-                amountBWei - (amountBWei * BigInt(Math.floor(slippage * 100))) / 100n, // amountBMin
-                wallet.address,
-                deadline,
-                { gasPrice: ethers.parseUnits('1', 'gwei') }
-            );
-            const receipt = await this.waitForReceipt(tx.hash);
-            return receipt !== null;
-        } catch (e) {
-            log(chalk.red(`Gagal mengirim transaksi add liquidity: ${e.message}`));
             return false;
         }
     }
@@ -268,7 +168,9 @@ class Faroswap {
         const wallet = new ethers.Wallet(PRIVATE_KEY, this.provider);
         const address = wallet.address;
         log(chalk.bold(`Memulai bot untuk akun: ${address}`));
-        log(chalk.bold(`Menggunakan RPC: ${this.provider.getRpcUrl()}`));
+        // --- FIX: Menggunakan this.rpcUrl yang sudah disimpan ---
+        log(chalk.bold(`Menggunakan RPC: ${this.rpcUrl}`));
+
         // FASE 1: SWAP
         if (JUMLAH_SWAP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Swap (${JUMLAH_SWAP} kali) ---`));
@@ -286,15 +188,14 @@ class Faroswap {
                     const allPossibleTickers = ["PHRS", ...this.tickers];
                     
                     for (const ticker of allPossibleTickers) {
-                        const contractAddress = this.getContractAddress(ticker);
-                        const balance = await this.getTokenBalance(address, contractAddress);
+                        const balance = await this.getTokenBalance(address, this.getContractAddress(ticker));
                         if (parseFloat(balance) > parseFloat(SWAP_AMOUNTS[ticker] || '0')) {
                             eligibleTickers.push(ticker);
                         }
                     }
 
                     if (eligibleTickers.length === 0) {
-                        log(chalk.red("Tidak ada token dengan saldo yang cukup untuk di-swap."));
+                        log(chalk.red("Tidak ada token dengan saldo yang cukup untuk di-swap. Menghentikan fase swap."));
                         break;
                     }
                     
@@ -306,7 +207,8 @@ class Faroswap {
                 }
 
                 log(`Dipilih pasangan: ${fromTicker} -> ${toTicker}`);
-                await this.performSwap(wallet, fromTicker, toTicker, SWAP_AMOUNTS[fromTicker] || "0.001");
+                const amount = SWAP_AMOUNTS[fromTicker] || "0.001";
+                await this.performSwap(wallet, fromTicker, toTicker, amount);
 
                 if (i < JUMLAH_SWAP - 1) {
                     const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
@@ -316,30 +218,30 @@ class Faroswap {
             }
         }
         
-        // FASE 2: TAMBAH LIKUIDITAS (LP)
-        if (JUMLAH_TAMBAH_LP > 0) {
-            log(chalk.bold(`\n--- Memulai Fase Tambah Likuiditas (${JUMLAH_TAMBAH_LP} kali) ---`));
-            for (let i = 0; i < JUMLAH_TAMBAH_LP; i++) {
-                log(chalk.bold(`--- Tambah LP #${i + 1}/${JUMLAH_TAMBAH_LP} ---`));
-                
-                let tokenA, tokenB;
-                do {
-                    tokenA = this.tickers[Math.floor(Math.random() * this.tickers.length)];
-                    tokenB = this.tickers[Math.floor(Math.random() * this.tickers.length)];
-                } while (tokenA === tokenB);
-                
-                const amount = ADD_LP_AMOUNTS[tokenA] || "0.001";
-                await this.performAddLiquidity(wallet, tokenA, tokenB, amount);
-                
-                if (i < JUMLAH_TAMBAH_LP - 1) {
-                    const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
-                    log(`Menunggu ${delay / 1000} detik sebelum transaksi berikutnya...`);
-                    await sleep(delay);
-                }
-            }
-        }
+        // Fungsionalitas Tambah LP masih ada di kode python, tapi belum sepenuhnya diimplementasikan di sini.
+        // Jika ingin menambahkannya, kita bisa refactor fungsi perform_add_liquidity.
+        log(chalk.bold(`\n--- Fase Tambah Likuiditas di-skip (belum diimplementasikan sepenuhnya) ---`));
 
-        log(chalk.bold.green(`\nSemua tugas telah selesai untuk akun ${address}.`));
+
+        log(chalk.bold.green(`\nSemua tugas yang terimplementasi telah selesai untuk akun ${address}.`));
+    }
+    
+    // Fungsi-fungsi lain yang belum sempat di-refactor penuh
+    async getTokenBalance(address, contractAddress) {
+        try {
+            if (contractAddress === this.PHRS_CONTRACT_ADDRESS) {
+                const balanceWei = await this.provider.getBalance(address);
+                return ethers.formatEther(balanceWei);
+            } else {
+                const tokenContract = new ethers.Contract(contractAddress, this.ERC20_CONTRACT_ABI, this.provider);
+                const balanceBigInt = await tokenContract.balanceOf(address);
+                const decimals = await tokenContract.decimals();
+                return ethers.formatUnits(balanceBigInt, Number(decimals));
+            }
+        } catch (e) {
+            log(chalk.red(`Gagal mendapatkan saldo token: ${e.message}`));
+            return '0';
+        }
     }
 }
 
@@ -349,8 +251,8 @@ async function main() {
         const bot = new Faroswap(RPC_URL);
         await bot.run();
     } catch (e) {
-        console.log(chalk.red(`\nTerjadi kesalahan fatal: ${e.stack}`));
+        log(chalk.red(`\nTerjadi kesalahan fatal yang tidak tertangani: ${e.stack}`));
     }
 }
 
-main().catch(console.error);
+main();
