@@ -268,8 +268,7 @@ class Faroswap {
         const wallet = new ethers.Wallet(PRIVATE_KEY, this.provider);
         const address = wallet.address;
         log(chalk.bold(`Memulai bot untuk akun: ${address}`));
-        log(chalk.bold(`Menggunakan RPC: ${this.provider.connection.url}`));
-
+        log(chalk.bold(`Menggunakan RPC: ${this.provider.getRpcUrl()}`));
         // FASE 1: SWAP
         if (JUMLAH_SWAP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Swap (${JUMLAH_SWAP} kali) ---`));
