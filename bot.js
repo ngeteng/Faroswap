@@ -3,7 +3,6 @@ import { ethers, MaxUint256 } from 'ethers';
 import axios from 'axios';
 import chalk from 'chalk';
 import dotenv from 'dotenv';
-import { getRandomUserAgent } from 'fake-useragent-node';
 import moment from 'moment-timezone';
 
 // Inisialisasi Dotenv
@@ -40,7 +39,12 @@ const JEDA_MAKSIMUM = 70 * 1000; // dalam milidetik
 
 class Faroswap {
     constructor(rpcUrl) {
-        this.HEADERS = { "Accept": "application/json, text/plain, */*", "Origin": "https://faroswap.xyz", "Referer": "https://faroswap.xyz/", "User-Agent": getRandomUserAgent() };
+        this.HEADERS = { 
+            "Accept": "application/json, text/plain, */*", 
+            "Origin": "https://faroswap.xyz", 
+            "Referer": "https://faroswap.xyz/", 
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36" 
+        };
         this.chainId = 688688;
 
         // Alamat Kontrak
