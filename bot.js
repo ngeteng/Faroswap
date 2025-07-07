@@ -24,7 +24,7 @@ const JUMLAH_SWAP = 5;
 const JUMLAH_TAMBAH_LP = 5;
 
 const SWAP_AMOUNTS = {
-    "WPHRS": "0.002", "USDC": "0.02", "USDT": "0.02",
+    "WPHRS": "0.002", "USDC": "1", "USDT": "1",
     "WETH": "0.00002", "WBTC": "0.000002",
 };
 const ADD_LP_AMOUNTS = {
