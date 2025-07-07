@@ -18,14 +18,13 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- KONFIGURASI --- //
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const RPC_URL = process.env.RPC_URL || "https://testnet.dplabs-internal.com";
-// --- PERUBAHAN --- Ambil WRAP_AMOUNT dari .env
 const WRAP_AMOUNT = process.env.WRAP_AMOUNT || "0.01";
 
 const JUMLAH_SWAP = 5;
 const JUMLAH_TAMBAH_LP = 5;
 
 const SWAP_AMOUNTS = {
-    "WPHRS": "0.02", "USDC": "0.1", "USDT": "0.1",
+    "WPHRS": "0.002", "USDC": "0.02", "USDT": "0.02",
     "WETH": "0.00002", "WBTC": "0.000002",
 };
 const ADD_LP_AMOUNTS = {
@@ -49,9 +48,9 @@ class Faroswap {
         this.USDT_CONTRACT_ADDRESS = "0xD4071393f8716661958F766DF660033b3d35fD29";
         this.WETH_CONTRACT_ADDRESS = "0x4E28826d32F1C398DED160DC16Ac6873357d048f";
         this.WBTC_CONTRACT_ADDRESS = "0x8275c526d1bCEc59a31d673929d3cE8d108fF5c7";
-        this.POOL_ROUTER_ADDRESS = "0xf05Af5E9dC3b1dd3ad0C087BD80D7391283775e0"; // Router untuk Swap dan LP
+        this.POOL_ROUTER_ADDRESS = "0xf05Af5E9dC3b1dd3ad0C087BD80D7391283775e0";
         
-        // --- DAFTAR TOKEN (Tanpa PHRS asli) ---
+        // --- DAFTAR TOKEN ERC20 (Tanpa PHRS asli) ---
         this.tickers = ["WPHRS", "USDC", "USDT", "WETH", "WBTC"];
 
         // --- ABI (Application Binary Interface) ---
@@ -63,7 +62,6 @@ class Faroswap {
             {"type":"function","name":"symbol","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"string"}]}
         ];
         this.WPHRS_ABI = [...this.ERC20_ABI, {"type":"function","name":"deposit","stateMutability":"payable","inputs":[],"outputs":[]},{"type":"function","name":"withdraw","stateMutability":"nonpayable","inputs":[{"name":"amount","type":"uint256"}],"outputs":[]}];
-        // --- PERUBAHAN --- Mengganti nama ABI agar lebih jelas, ini untuk Router
         this.UNISWAP_V2_ROUTER_ABI = [{"type":"function","name":"getAmountsOut","stateMutability":"view","inputs":[{"name":"amountIn","type":"uint256"},{"name":"path","type":"address[]"},{"name":"fees","type":"uint256[]"}],"outputs":[{"name":"amounts","type":"uint256[]"}]},{"type":"function","name":"addLiquidity","stateMutability":"payable","inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint256"},{"name":"amountADesired","type":"uint256"},{"name":"amountBDesired","type":"uint256"},{"name":"amountAMin","type":"uint256"},{"name":"amountBMin","type":"uint256"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amountA","type":"uint256"},{"name":"amountB","type":"uint256"},{"name":"liquidity","type":"uint256"}]},{"type":"function","name":"swapExactTokensForTokens","stateMutability":"nonpayable","inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amounts","type":"uint256[]"}]}];
         
         // --- Instance Kontrak ---
@@ -111,15 +109,17 @@ class Faroswap {
         }
     }
 
-    // --- PERBAIKAN TOTAL --- Fungsi swap sekarang jauh lebih canggih
     async performSwap(wallet, fromTicker, toTicker, amountDecimal) {
         log(`Memulai swap: ${amountDecimal} ${fromTicker} -> ${toTicker}`);
         const fromTokenAddress = this.getContractAddress(fromTicker);
         const toTokenAddress = this.getContractAddress(toTicker);
-        const amountWei = ethers.parseUnits(amountDecimal.toString(), 18); // Asumsi semua token punya 18 desimal
 
         try {
             let tx;
+            const fromTokenContract = new ethers.Contract(fromTokenAddress, this.ERC20_ABI, this.provider);
+            const fromDecimals = (fromTicker === 'PHRS') ? 18 : await fromTokenContract.decimals();
+            const amountWei = ethers.parseUnits(amountDecimal.toString(), Number(fromDecimals));
+
             // KASUS 1: WRAP (PHRS -> WPHRS)
             if (fromTicker === 'PHRS' && toTicker === 'WPHRS') {
                 log(`Melakukan wrap ${amountDecimal} PHRS...`);
@@ -132,21 +132,27 @@ class Faroswap {
                 const wphrsSigner = this.wphrsContract.connect(wallet);
                 tx = await wphrsSigner.withdraw(amountWei);
             }
-            // KASUS 3: SWAP TOKEN BIASA (misal WPHRS -> USDC)
+            // KASUS 3: SWAP TOKEN BIASA (via Router)
             else {
                 log(`Melakukan swap via router...`);
                 if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, fromTokenAddress, amountWei)) {
                      log(chalk.red(`Gagal approve, swap dibatalkan.`));
                      return false;
                 }
-                const deadline = Math.floor(Date.now() / 1000) + 600; // 10 menit
+                
+                let path;
+                if (fromTicker !== 'WPHRS' && toTicker !== 'WPHRS') {
+                    log(chalk.yellow(`Swap multi-hop: ${fromTicker} -> WPHRS -> ${toTicker}`));
+                    path = [fromTokenAddress, this.WPHRS_CONTRACT_ADDRESS, toTokenAddress];
+                } else {
+                    log(chalk.yellow(`Swap direct-hop: ${fromTicker} -> ${toTicker}`));
+                    path = [fromTokenAddress, toTokenAddress];
+                }
+
+                const deadline = Math.floor(Date.now() / 1000) + 600;
                 const poolContractSigner = this.poolContract.connect(wallet);
                 tx = await poolContractSigner.swapExactTokensForTokens(
-                    amountWei,
-                    0, // amountOutMin, kita set 0 untuk simple
-                    [fromTokenAddress, toTokenAddress], // path
-                    wallet.address,
-                    deadline
+                    amountWei, 0, path, wallet.address, deadline
                 );
             }
             const receipt = await this.waitForReceipt(tx.hash);
@@ -159,10 +165,14 @@ class Faroswap {
     
     async performAddLiquidity(wallet, tokenATicker, tokenBTicker, amountADecimal) {
         log(`Memulai Tambah Likuiditas: ${amountADecimal} ${tokenATicker} dengan ${tokenBTicker}`);
-
         const tokenAAddress = this.getContractAddress(tokenATicker);
         const tokenBAddress = this.getContractAddress(tokenBTicker);
         
+        if (!amountADecimal || parseFloat(amountADecimal) <= 0) {
+            log(chalk.red(`Jumlah untuk ${tokenATicker} tidak valid.`));
+            return false;
+        }
+
         const balanceA = await this.getTokenBalance(wallet.address, tokenAAddress);
         if (parseFloat(balanceA) < parseFloat(amountADecimal)) {
             log(chalk.red(`Saldo ${tokenATicker} tidak cukup. Saldo: ${balanceA}, butuh: ${amountADecimal}`));
@@ -175,11 +185,10 @@ class Faroswap {
 
         let amountBWei;
         try {
-            // Fee di hardcode 30 sesuai kode awal, mungkin ini fee poolnya
             const amountsOut = await this.poolContract.getAmountsOut(amountAWei, [tokenAAddress, tokenBAddress], [30]);
             amountBWei = amountsOut[1];
         } catch(e) {
-            log(chalk.red(`Gagal menghitung jumlah token B: ${e.message}`));
+            log(chalk.red(`Gagal menghitung jumlah token B: Kemungkinan pool belum ada. Error: ${e.message}`));
             return false;
         }
         
@@ -188,7 +197,6 @@ class Faroswap {
         const amountBDecimal = ethers.formatUnits(amountBWei, Number(tokenBDecimals));
         log(chalk.yellow(`Dibutuhkan sekitar ${amountBDecimal} ${tokenBTicker}`));
 
-        // --- PERBAIKAN --- Menambahkan pengecekan saldo untuk Token B
         const balanceB = await this.getTokenBalance(wallet.address, tokenBAddress);
         if (parseFloat(balanceB) < parseFloat(amountBDecimal)) {
             log(chalk.red(`Saldo ${tokenBTicker} tidak cukup. Saldo: ${balanceB}, butuh: ${amountBDecimal}`));
@@ -198,20 +206,13 @@ class Faroswap {
         if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenAAddress, amountAWei)) return false;
         if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenBAddress, amountBWei)) return false;
         
-        const deadline = Math.floor(Date.now() / 1000) + 600; // 10 menit
-        
         try {
             const lpContractWithSigner = this.poolContract.connect(wallet);
+            const deadline = Math.floor(Date.now() / 1000) + 600;
             const tx = await lpContractWithSigner.addLiquidity(
-                tokenAAddress,
-                tokenBAddress,
-                30, // Fee
-                amountAWei,
-                amountBWei,
-                (amountAWei * 95n) / 100n, // amountAMin (5% slippage)
-                (amountBWei * 95n) / 100n, // amountBMin (5% slippage)
-                wallet.address,
-                deadline
+                tokenAAddress, tokenBAddress, 30, amountAWei, amountBWei,
+                (amountAWei * 95n) / 100n, (amountBWei * 95n) / 100n, // 5% slippage
+                wallet.address, deadline
             );
             const receipt = await this.waitForReceipt(tx.hash);
             return receipt !== null;
@@ -228,12 +229,11 @@ class Faroswap {
         }
 
         const wallet = new ethers.Wallet(PRIVATE_KEY, this.provider);
-        const address = wallet.address;
-        log(chalk.bold(`Memulai bot untuk akun: ${address}`));
+        log(chalk.bold(`Memulai bot untuk akun: ${wallet.address}`));
 
-        // --- PERUBAHAN --- TAHAP 0: WRAP PHRS KE WPHRS
+        // --- TAHAP 0: WRAP PHRS KE WPHRS ---
         log(chalk.bold.magenta(`\n--- TAHAP 0: Membungkus ${WRAP_AMOUNT} PHRS menjadi WPHRS ---`));
-        const phrsBalance = await this.getTokenBalance(address, this.PHRS_CONTRACT_ADDRESS);
+        const phrsBalance = await this.getTokenBalance(wallet.address, this.PHRS_CONTRACT_ADDRESS);
         if (parseFloat(phrsBalance) < parseFloat(WRAP_AMOUNT)) {
              log(chalk.red(`Saldo PHRS tidak cukup untuk wrap. Saldo: ${phrsBalance}, butuh: ${WRAP_AMOUNT}`));
         } else {
@@ -242,34 +242,32 @@ class Faroswap {
              await sleep(JEDA_MINIMUM);
         }
        
-        // FASE 1: SWAP (Hanya menggunakan token ERC20)
+        // --- FASE 1: SWAP (Hanya menggunakan token ERC20) ---
         if (JUMLAH_SWAP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Swap (${JUMLAH_SWAP} kali) ---`));
             for (let i = 0; i < JUMLAH_SWAP; i++) {
                 log(chalk.bold(`--- Swap #${i + 1}/${JUMLAH_SWAP} ---`));
-                
-                let fromTicker, toTicker;
                 const eligibleTickers = [];
-                for (const ticker of this.tickers) { // Hanya iterasi token ERC20
-                    const balance = await this.getTokenBalance(address, this.getContractAddress(ticker));
+                for (const ticker of this.tickers) {
+                    const balance = await this.getTokenBalance(wallet.address, this.getContractAddress(ticker));
                     if (parseFloat(balance) > parseFloat(SWAP_AMOUNTS[ticker] || '0')) {
                         eligibleTickers.push(ticker);
                     }
                 }
 
-                if (eligibleTickers.length === 0) {
+                if (eligibleTickers.length < 1) {
                     log(chalk.red("Tidak ada token dengan saldo yang cukup untuk di-swap. Menghentikan fase swap."));
                     break;
                 }
                 
-                fromTicker = eligibleTickers[Math.floor(Math.random() * eligibleTickers.length)];
+                const fromTicker = eligibleTickers[Math.floor(Math.random() * eligibleTickers.length)];
+                let toTicker;
                 do {
                     toTicker = this.tickers[Math.floor(Math.random() * this.tickers.length)];
                 } while (fromTicker === toTicker);
 
                 log(`Dipilih pasangan: ${fromTicker} -> ${toTicker}`);
-                const amount = SWAP_AMOUNTS[fromTicker];
-                await this.performSwap(wallet, fromTicker, toTicker, amount);
+                await this.performSwap(wallet, fromTicker, toTicker, SWAP_AMOUNTS[fromTicker]);
 
                 if (i < JUMLAH_SWAP - 1 || JUMLAH_TAMBAH_LP > 0) {
                     const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
@@ -279,21 +277,22 @@ class Faroswap {
             }
         }
         
-        // FASE 2: TAMBAH LIKUIDITAS (Hanya menggunakan token ERC20)
+        // --- FASE 2: TAMBAH LIKUIDITAS (selalu dengan WPHRS) ---
         if (JUMLAH_TAMBAH_LP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Tambah Likuiditas (${JUMLAH_TAMBAH_LP} kali) ---`));
+            const lpTickers = this.tickers.filter(t => t !== 'WPHRS');
+
             for (let i = 0; i < JUMLAH_TAMBAH_LP; i++) {
                 log(chalk.bold(`--- Tambah LP #${i + 1}/${JUMLAH_TAMBAH_LP} ---`));
+                if (lpTickers.length === 0) {
+                    log(chalk.red("Tidak ada token lain untuk dipasangkan dengan WPHRS.")); break;
+                }
                 
-                let tokenA, tokenB;
-                // Logika bisa ditingkatkan untuk memilih dari token yang saldonya cukup
-                do {
-                    tokenA = this.tickers[Math.floor(Math.random() * this.tickers.length)];
-                    tokenB = this.tickers[Math.floor(Math.random() * this.tickers.length)];
-                } while (tokenA === tokenB);
+                const tokenA = lpTickers[Math.floor(Math.random() * lpTickers.length)];
+                const tokenB = 'WPHRS';
                 
-                const amount = ADD_LP_AMOUNTS[tokenA];
-                await this.performAddLiquidity(wallet, tokenA, tokenB, amount);
+                log(`Memilih pasangan LP: ${tokenA} - ${tokenB}`);
+                await this.performAddLiquidity(wallet, tokenA, tokenB, ADD_LP_AMOUNTS[tokenA]);
                 
                 if (i < JUMLAH_TAMBAH_LP - 1) {
                     const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
@@ -303,14 +302,13 @@ class Faroswap {
             }
         }
 
-        log(chalk.bold.green(`\nSemua tugas telah selesai untuk akun ${address}.`));
+        log(chalk.bold.green(`\nSemua tugas telah selesai untuk akun ${wallet.address}.`));
     }
     
     async getTokenBalance(address, contractAddress) {
         try {
             if (contractAddress === this.PHRS_CONTRACT_ADDRESS) {
-                const balanceWei = await this.provider.getBalance(address);
-                return ethers.formatEther(balanceWei);
+                return ethers.formatEther(await this.provider.getBalance(address));
             } else {
                 const tokenContract = new ethers.Contract(contractAddress, this.ERC20_ABI, this.provider);
                 const balanceBigInt = await tokenContract.balanceOf(address);
@@ -318,13 +316,12 @@ class Faroswap {
                 return ethers.formatUnits(balanceBigInt, Number(decimals));
             }
         } catch (e) {
-            log(chalk.red(`Gagal mendapatkan saldo token di ${contractAddress}: ${e.message}`));
+            log(chalk.red(`Gagal mendapatkan saldo token di ${contractAddress.slice(0,10)}...: ${e.message}`));
             return '0';
         }
     }
 }
 
-// Main execution block
 async function main() {
     try {
         const bot = new Faroswap(RPC_URL);
