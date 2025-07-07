@@ -24,8 +24,8 @@ const JUMLAH_SWAP = 5;
 const JUMLAH_TAMBAH_LP = 5;
 
 const SWAP_AMOUNTS = {
-    "WPHRS": "0.002", "USDC": "0.02", "USDT": "0.02",
-    "WETH": "0.00002", "WBTC": "0.000002",
+    "WPHRS": "0.001", "USDC": "0.01", "USDT": "0.01",
+    "WETH": "0.00001", "WBTC": "0.000001",
 };
 const ADD_LP_AMOUNTS = {
     "WPHRS": "0.001", "USDC": "0.01", "USDT": "0.01",
@@ -48,23 +48,19 @@ class Faroswap {
         this.USDT_CONTRACT_ADDRESS = "0xD4071393f8716661958F766DF660033b3d35fD29";
         this.WETH_CONTRACT_ADDRESS = "0x4E28826d32F1C398DED160DC16Ac6873357d048f";
         this.WBTC_CONTRACT_ADDRESS = "0x8275c526d1bCEc59a31d673929d3cE8d108fF5c7";
+        
+        // --- PERBAIKAN --- Memisahkan Router Swap dan Router LP
+        this.MIXSWAP_ROUTER_ADDRESS = "0x3541423f25A1Ca5C98fdBCf478405d3f0aaD1164";
         this.POOL_ROUTER_ADDRESS = "0xf05Af5E9dC3b1dd3ad0C087BD80D7391283775e0";
         
-        // --- DAFTAR TOKEN ERC20 (Tanpa PHRS asli) ---
         this.tickers = ["WPHRS", "USDC", "USDT", "WETH", "WBTC"];
 
-        // --- ABI (Application Binary Interface) ---
-        this.ERC20_ABI = [
-            {"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"address","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
-            {"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
-            {"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},
-            {"type":"function","name":"decimals","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]},
-            {"type":"function","name":"symbol","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"string"}]}
-        ];
+        this.ERC20_ABI = [{"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"address","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},{"type":"function","name":"allowance","stateMutability":"view","inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},{"type":"function","name":"approve","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"name":"","type":"bool"}]},{"type":"function","name":"decimals","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"uint8"}]},{"type":"function","name":"symbol","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"string"}]}];
         this.WPHRS_ABI = [...this.ERC20_ABI, {"type":"function","name":"deposit","stateMutability":"payable","inputs":[],"outputs":[]},{"type":"function","name":"withdraw","stateMutability":"nonpayable","inputs":[{"name":"amount","type":"uint256"}],"outputs":[]}];
         this.UNISWAP_V2_ROUTER_ABI = [{"type":"function","name":"getAmountsOut","stateMutability":"view","inputs":[{"name":"amountIn","type":"uint256"},{"name":"path","type":"address[]"},{"name":"fees","type":"uint256[]"}],"outputs":[{"name":"amounts","type":"uint256[]"}]},{"type":"function","name":"addLiquidity","stateMutability":"payable","inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint256"},{"name":"amountADesired","type":"uint256"},{"name":"amountBDesired","type":"uint256"},{"name":"amountAMin","type":"uint256"},{"name":"amountBMin","type":"uint256"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amountA","type":"uint256"},{"name":"amountB","type":"uint256"},{"name":"liquidity","type":"uint256"}]},{"type":"function","name":"swapExactTokensForTokens","stateMutability":"nonpayable","inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amounts","type":"uint256[]"}]}];
         
-        // --- Instance Kontrak ---
+        // --- PERBAIKAN --- Membuat instance untuk kedua router
+        this.mixSwapContract = new ethers.Contract(this.MIXSWAP_ROUTER_ADDRESS, this.UNISWAP_V2_ROUTER_ABI, this.provider);
         this.poolContract = new ethers.Contract(this.POOL_ROUTER_ADDRESS, this.UNISWAP_V2_ROUTER_ABI, this.provider);
         this.wphrsContract = new ethers.Contract(this.WPHRS_CONTRACT_ADDRESS, this.WPHRS_ABI, this.provider);
     }
@@ -77,7 +73,7 @@ class Faroswap {
     async waitForReceipt(txHash) {
         log(`Menunggu receipt untuk transaksi: ${chalk.yellow(txHash)}`);
         try {
-            const receipt = await this.provider.waitForTransaction(txHash, 1, 180000); // 1 konfirmasi, timeout 3 menit
+            const receipt = await this.provider.waitForTransaction(txHash, 1, 180000);
             if (receipt && receipt.status === 1) {
                 log(chalk.green(`Transaksi sukses! Explorer: https://testnet.pharosscan.xyz/tx/${txHash}`));
                 return receipt;
@@ -96,10 +92,10 @@ class Faroswap {
         try {
             const allowance = await tokenContract.allowance(wallet.address, spenderAddress);
             if (allowance >= amountWei) {
-                log(chalk.green(`Allowance sudah cukup untuk ${await tokenContract.symbol()}`));
+                log(chalk.green(`Allowance sudah cukup untuk ${await tokenContract.symbol()} ke ${spenderAddress.slice(0,6)}...`));
                 return true;
             }
-            log(`Memerlukan approval untuk ${await tokenContract.symbol()}...`);
+            log(`Memerlukan approval untuk ${await tokenContract.symbol()} ke ${spenderAddress.slice(0,6)}...`);
             const approveTx = await tokenContract.approve(spenderAddress, MaxUint256);
             const receipt = await this.waitForReceipt(approveTx.hash);
             return receipt !== null;
@@ -120,38 +116,31 @@ class Faroswap {
             const fromDecimals = (fromTicker === 'PHRS') ? 18 : await fromTokenContract.decimals();
             const amountWei = ethers.parseUnits(amountDecimal.toString(), Number(fromDecimals));
 
-            // KASUS 1: WRAP (PHRS -> WPHRS)
             if (fromTicker === 'PHRS' && toTicker === 'WPHRS') {
-                log(`Melakukan wrap ${amountDecimal} PHRS...`);
                 const wphrsSigner = this.wphrsContract.connect(wallet);
                 tx = await wphrsSigner.deposit({ value: amountWei });
             }
-            // KASUS 2: UNWRAP (WPHRS -> PHRS)
             else if (fromTicker === 'WPHRS' && toTicker === 'PHRS') {
-                log(`Melakukan unwrap ${amountDecimal} WPHRS...`);
                 const wphrsSigner = this.wphrsContract.connect(wallet);
                 tx = await wphrsSigner.withdraw(amountWei);
             }
-            // KASUS 3: SWAP TOKEN BIASA (via Router)
             else {
-                log(`Melakukan swap via router...`);
-                if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, fromTokenAddress, amountWei)) {
+                // --- PERBAIKAN --- Approval dan swap sekarang ke MIXSWAP_ROUTER_ADDRESS
+                if (!await this.approveToken(wallet, this.MIXSWAP_ROUTER_ADDRESS, fromTokenAddress, amountWei)) {
                      log(chalk.red(`Gagal approve, swap dibatalkan.`));
                      return false;
                 }
                 
                 let path;
                 if (fromTicker !== 'WPHRS' && toTicker !== 'WPHRS') {
-                    log(chalk.yellow(`Swap multi-hop: ${fromTicker} -> WPHRS -> ${toTicker}`));
                     path = [fromTokenAddress, this.WPHRS_CONTRACT_ADDRESS, toTokenAddress];
                 } else {
-                    log(chalk.yellow(`Swap direct-hop: ${fromTicker} -> ${toTicker}`));
                     path = [fromTokenAddress, toTokenAddress];
                 }
 
                 const deadline = Math.floor(Date.now() / 1000) + 600;
-                const poolContractSigner = this.poolContract.connect(wallet);
-                tx = await poolContractSigner.swapExactTokensForTokens(
+                const mixSwapContractSigner = this.mixSwapContract.connect(wallet);
+                tx = await mixSwapContractSigner.swapExactTokensForTokens(
                     amountWei, 0, path, wallet.address, deadline
                 );
             }
@@ -168,16 +157,10 @@ class Faroswap {
         const tokenAAddress = this.getContractAddress(tokenATicker);
         const tokenBAddress = this.getContractAddress(tokenBTicker);
         
-        if (!amountADecimal || parseFloat(amountADecimal) <= 0) {
-            log(chalk.red(`Jumlah untuk ${tokenATicker} tidak valid.`));
-            return false;
-        }
+        if (!amountADecimal || parseFloat(amountADecimal) <= 0) return false;
 
         const balanceA = await this.getTokenBalance(wallet.address, tokenAAddress);
-        if (parseFloat(balanceA) < parseFloat(amountADecimal)) {
-            log(chalk.red(`Saldo ${tokenATicker} tidak cukup. Saldo: ${balanceA}, butuh: ${amountADecimal}`));
-            return false;
-        }
+        if (parseFloat(balanceA) < parseFloat(amountADecimal)) return false;
         
         const tokenAContract = new ethers.Contract(tokenAAddress, this.ERC20_ABI, this.provider);
         const decimalsA = await tokenAContract.decimals();
@@ -188,8 +171,7 @@ class Faroswap {
             const amountsOut = await this.poolContract.getAmountsOut(amountAWei, [tokenAAddress, tokenBAddress], [30]);
             amountBWei = amountsOut[1];
         } catch(e) {
-            log(chalk.red(`Gagal menghitung jumlah token B: Kemungkinan pool belum ada. Error: ${e.message}`));
-            return false;
+            log(chalk.red(`Gagal menghitung jumlah token B: ${e.message}`)); return false;
         }
         
         const tokenBContract = new ethers.Contract(tokenBAddress, this.ERC20_ABI, this.provider);
@@ -198,11 +180,9 @@ class Faroswap {
         log(chalk.yellow(`Dibutuhkan sekitar ${amountBDecimal} ${tokenBTicker}`));
 
         const balanceB = await this.getTokenBalance(wallet.address, tokenBAddress);
-        if (parseFloat(balanceB) < parseFloat(amountBDecimal)) {
-            log(chalk.red(`Saldo ${tokenBTicker} tidak cukup. Saldo: ${balanceB}, butuh: ${amountBDecimal}`));
-            return false;
-        }
+        if (parseFloat(balanceB) < parseFloat(amountBDecimal)) return false;
 
+        // --- PERBAIKAN --- Approval untuk likuiditas tetap ke POOL_ROUTER_ADDRESS
         if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenAAddress, amountAWei)) return false;
         if (!await this.approveToken(wallet, this.POOL_ROUTER_ADDRESS, tokenBAddress, amountBWei)) return false;
         
@@ -211,11 +191,10 @@ class Faroswap {
             const deadline = Math.floor(Date.now() / 1000) + 600;
             const tx = await lpContractWithSigner.addLiquidity(
                 tokenAAddress, tokenBAddress, 30, amountAWei, amountBWei,
-                (amountAWei * 95n) / 100n, (amountBWei * 95n) / 100n, // 5% slippage
+                (amountAWei * 95n) / 100n, (amountBWei * 95n) / 100n,
                 wallet.address, deadline
             );
-            const receipt = await this.waitForReceipt(tx.hash);
-            return receipt !== null;
+            return await this.waitForReceipt(tx.hash) !== null;
         } catch (e) {
             log(chalk.red(`Gagal mengirim transaksi add liquidity: ${e.message}`));
             return false;
@@ -224,25 +203,20 @@ class Faroswap {
 
     async run() {
         if (!PRIVATE_KEY) {
-            log(chalk.red("Error: PRIVATE_KEY tidak ditemukan di file .env."));
-            return;
+            log(chalk.red("Error: PRIVATE_KEY tidak ditemukan di file .env.")); return;
         }
-
         const wallet = new ethers.Wallet(PRIVATE_KEY, this.provider);
         log(chalk.bold(`Memulai bot untuk akun: ${wallet.address}`));
 
-        // --- TAHAP 0: WRAP PHRS KE WPHRS ---
         log(chalk.bold.magenta(`\n--- TAHAP 0: Membungkus ${WRAP_AMOUNT} PHRS menjadi WPHRS ---`));
         const phrsBalance = await this.getTokenBalance(wallet.address, this.PHRS_CONTRACT_ADDRESS);
         if (parseFloat(phrsBalance) < parseFloat(WRAP_AMOUNT)) {
-             log(chalk.red(`Saldo PHRS tidak cukup untuk wrap. Saldo: ${phrsBalance}, butuh: ${WRAP_AMOUNT}`));
+             log(chalk.red(`Saldo PHRS tidak cukup untuk wrap.`));
         } else {
              await this.performSwap(wallet, "PHRS", "WPHRS", WRAP_AMOUNT);
-             log(`Menunggu jeda singkat setelah wrapping...`);
              await sleep(JEDA_MINIMUM);
         }
        
-        // --- FASE 1: SWAP (Hanya menggunakan token ERC20) ---
         if (JUMLAH_SWAP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Swap (${JUMLAH_SWAP} kali) ---`));
             for (let i = 0; i < JUMLAH_SWAP; i++) {
@@ -250,59 +224,31 @@ class Faroswap {
                 const eligibleTickers = [];
                 for (const ticker of this.tickers) {
                     const balance = await this.getTokenBalance(wallet.address, this.getContractAddress(ticker));
-                    if (parseFloat(balance) > parseFloat(SWAP_AMOUNTS[ticker] || '0')) {
-                        eligibleTickers.push(ticker);
-                    }
+                    if (parseFloat(balance) > parseFloat(SWAP_AMOUNTS[ticker] || '0')) eligibleTickers.push(ticker);
                 }
-
-                if (eligibleTickers.length < 1) {
-                    log(chalk.red("Tidak ada token dengan saldo yang cukup untuk di-swap. Menghentikan fase swap."));
-                    break;
-                }
-                
+                if (eligibleTickers.length < 1) { log(chalk.red("Saldo token tidak cukup untuk swap.")); break; }
                 const fromTicker = eligibleTickers[Math.floor(Math.random() * eligibleTickers.length)];
                 let toTicker;
-                do {
-                    toTicker = this.tickers[Math.floor(Math.random() * this.tickers.length)];
-                } while (fromTicker === toTicker);
-
+                do { toTicker = this.tickers[Math.floor(Math.random() * this.tickers.length)]; } while (fromTicker === toTicker);
                 log(`Dipilih pasangan: ${fromTicker} -> ${toTicker}`);
                 await this.performSwap(wallet, fromTicker, toTicker, SWAP_AMOUNTS[fromTicker]);
-
-                if (i < JUMLAH_SWAP - 1 || JUMLAH_TAMBAH_LP > 0) {
-                    const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
-                    log(`Menunggu ${delay / 1000} detik...`);
-                    await sleep(delay);
-                }
+                if (i < JUMLAH_SWAP - 1 || JUMLAH_TAMBAH_LP > 0) await sleep(Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM));
             }
         }
         
-        // --- FASE 2: TAMBAH LIKUIDITAS (selalu dengan WPHRS) ---
         if (JUMLAH_TAMBAH_LP > 0) {
             log(chalk.bold(`\n--- Memulai Fase Tambah Likuiditas (${JUMLAH_TAMBAH_LP} kali) ---`));
             const lpTickers = this.tickers.filter(t => t !== 'WPHRS');
-
             for (let i = 0; i < JUMLAH_TAMBAH_LP; i++) {
                 log(chalk.bold(`--- Tambah LP #${i + 1}/${JUMLAH_TAMBAH_LP} ---`));
-                if (lpTickers.length === 0) {
-                    log(chalk.red("Tidak ada token lain untuk dipasangkan dengan WPHRS.")); break;
-                }
-                
+                if (lpTickers.length === 0) { log(chalk.red("Tidak ada token lain untuk dipasangkan dengan WPHRS.")); break; }
                 const tokenA = lpTickers[Math.floor(Math.random() * lpTickers.length)];
-                const tokenB = 'WPHRS';
-                
-                log(`Memilih pasangan LP: ${tokenA} - ${tokenB}`);
-                await this.performAddLiquidity(wallet, tokenA, tokenB, ADD_LP_AMOUNTS[tokenA]);
-                
-                if (i < JUMLAH_TAMBAH_LP - 1) {
-                    const delay = Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM);
-                    log(`Menunggu ${delay / 1000} detik...`);
-                    await sleep(delay);
-                }
+                log(`Memilih pasangan LP: ${tokenA} - WPHRS`);
+                await this.performAddLiquidity(wallet, tokenA, 'WPHRS', ADD_LP_AMOUNTS[tokenA]);
+                if (i < JUMLAH_TAMBAH_LP - 1) await sleep(Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM));
             }
         }
-
-        log(chalk.bold.green(`\nSemua tugas telah selesai untuk akun ${wallet.address}.`));
+        log(chalk.bold.green(`\nSemua tugas telah selesai.`));
     }
     
     async getTokenBalance(address, contractAddress) {
@@ -311,12 +257,11 @@ class Faroswap {
                 return ethers.formatEther(await this.provider.getBalance(address));
             } else {
                 const tokenContract = new ethers.Contract(contractAddress, this.ERC20_ABI, this.provider);
-                const balanceBigInt = await tokenContract.balanceOf(address);
+                const balance = await tokenContract.balanceOf(address);
                 const decimals = await tokenContract.decimals();
-                return ethers.formatUnits(balanceBigInt, Number(decimals));
+                return ethers.formatUnits(balance, Number(decimals));
             }
         } catch (e) {
-            log(chalk.red(`Gagal mendapatkan saldo token di ${contractAddress.slice(0,10)}...: ${e.message}`));
             return '0';
         }
     }
@@ -327,7 +272,7 @@ async function main() {
         const bot = new Faroswap(RPC_URL);
         await bot.run();
     } catch (e) {
-        log(chalk.red(`\nTerjadi kesalahan fatal yang tidak tertangani: ${e.stack}`));
+        log(chalk.red(`\nTerjadi kesalahan fatal: ${e.stack}`));
     }
 }
 
