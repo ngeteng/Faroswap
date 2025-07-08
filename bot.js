@@ -99,17 +99,31 @@ const apiClaimFaucet = async (walletAddress, jwt) => {
 };
 
 const apiVerifyTask = async (walletAddress, jwt, txHash) => {
+    // Logika pengecekan JWT tetap sama
     if (!jwt) {
         log(chalk.bgRed.bold(' MELEWATI VERIFIKASI ') + ' JWT (token login) tidak ditemukan. Verifikasi tidak bisa dilanjutkan.');
         return false;
     }
 
     log(chalk.blue(`Mencoba verifikasi task untuk TX: ${txHash.slice(0,10)}...`));
-    const url = `${API_BASE_URL}/task/verify?address=${walletAddress}&task_id=${TASK_ID_INTERACTION}&tx_hash=${txHash}`;
+    
+    // <<< PERBAIKAN DI SINI >>>
+    // 1. URL sekarang bersih tanpa parameter tambahan
+    const url = `${API_BASE_URL}/task/verify`;
+
+    // 2. Data yang akan dikirim kita jadikan objek 'body'
+    const requestBody = {
+        address: walletAddress,
+        task_id: TASK_ID_INTERACTION,
+        tx_hash: txHash
+    };
+    // <<< AKHIR PERBAIKAN >>>
 
     for (let attempt = 1; attempt <= 5; attempt++) {
         try {
-            const response = await axios.post(url, {}, { headers: createApiHeaders(jwt) }); // Menggunakan header lengkap
+            // 3. Kirim 'requestBody' sebagai data di dalam permintaan POST
+            const response = await axios.post(url, requestBody, { headers: createApiHeaders(jwt) });
+            
             const data = response.data;
             if (data.code === 0 && data.data && data.data.verified) {
                 log(chalk.green(`✔️  Task berhasil diverifikasi untuk TX: ${txHash.slice(0,10)}!`));
