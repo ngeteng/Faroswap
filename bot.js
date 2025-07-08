@@ -20,6 +20,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // =============================================================================
 // 2. KONFIGURASI UTAMA
 // =============================================================================
+// ... (Bagian ini tidak berubah, tetap sama seperti sebelumnya)
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const RPC_URL = process.env.RPC_URL || "https://testnet.dplabs-internal.com";
 const WRAP_AMOUNT = process.env.WRAP_AMOUNT || "0.01";
@@ -42,20 +43,32 @@ const WPHRS_ABI = [...ERC20_ABI, {"type":"function","name":"deposit","stateMutab
 const UNISWAP_V2_ROUTER_ABI = [{"type":"function","name":"getAmountsOut","stateMutability":"view","inputs":[{"name":"amountIn","type":"uint256"},{"name":"path","type":"address[]"},{"name":"fees","type":"uint256[]"}],"outputs":[{"name":"amounts","type":"uint256[]"}]},{"type":"function","name":"addLiquidity","stateMutability":"payable","inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint256"},{"name":"amountADesired","type":"uint256"},{"name":"amountBDesired","type":"uint256"},{"name":"amountAMin","type":"uint256"},{"name":"amountBMin","type":"uint256"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amountA","type":"uint256"},{"name":"amountB","type":"uint256"},{"name":"liquidity","type":"uint256"}]},{"type":"function","name":"swapExactTokensForTokens","stateMutability":"nonpayable","inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amounts","type":"uint256[]"}]}];
 
 // =============================================================================
-// 3. FUNGSI INTERAKSI API PHAROS
+// 3. FUNGSI INTERAKSI API PHAROS (DENGAN HEADER LENGKAP)
 // =============================================================================
+
+// <<< PERBAIKAN UTAMA: MEMBUAT OBJEK HEADER YANG LENGKAP >>>
+const createApiHeaders = (jwt = null) => {
+    return {
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'authorization': `Bearer ${jwt || 'null'}`,
+        'origin': 'https://testnet.pharosnetwork.xyz',
+        'referer': 'https://testnet.pharosnetwork.xyz/',
+        'user-agent': randomUseragent.getRandom(),
+    };
+};
 
 const apiLogin = async (wallet) => {
     log(chalk.blue('Mencoba login ke API Pharos...'));
     const signature = await wallet.signMessage(SIGN_MESSAGE_CONTENT);
     const url = `${API_BASE_URL}/user/login?address=${wallet.address}&signature=${signature}&invite_code=${INVITE_CODE}`;
     try {
-        const response = await axios.post(url, {}, { headers: { 'User-Agent': randomUseragent.getRandom() } });
+        const response = await axios.post(url, {}, { headers: createApiHeaders() }); // Menggunakan header lengkap
         if (response.data.code === 0 && response.data.data.jwt) {
             log(chalk.green('Login API sukses!'));
             return response.data.data.jwt;
         } else {
-            log(chalk.yellow(`Login API gagal: ${response.data.msg || 'Unknown error'}`));
+            log(chalk.yellow(`Login API gagal: [${response.status}] ${response.data.msg || 'Unknown error'}`));
             return null;
         }
     } catch (error) {
@@ -69,7 +82,7 @@ const apiClaimFaucet = async (walletAddress, jwt) => {
     log(chalk.blue('Mencoba klaim faucet...'));
     const claimUrl = `${API_BASE_URL}/faucet/daily?address=${walletAddress}`;
     try {
-        const claimResponse = await axios.post(claimUrl, {}, { headers: { 'Authorization': `Bearer ${jwt}`, 'User-Agent': randomUseragent.getRandom() } });
+        const claimResponse = await axios.post(claimUrl, {}, { headers: createApiHeaders(jwt) }); // Menggunakan header lengkap
         if (claimResponse.data.code === 0) {
             log(chalk.green('Faucet berhasil diklaim!'));
             return true;
@@ -86,19 +99,17 @@ const apiClaimFaucet = async (walletAddress, jwt) => {
 };
 
 const apiVerifyTask = async (walletAddress, jwt, txHash) => {
-    // <<< LOG YANG LEBIH JELAS DITAMBAHKAN DI SINI >>>
     if (!jwt) {
-        log(chalk.bgRed.bold(' MELEWATI VERIFIKASI ') + ' JWT (token login) tidak ditemukan. Verifikasi tidak bisa dilanjutkan karena login gagal di awal.');
+        log(chalk.bgRed.bold(' MELEWATI VERIFIKASI ') + ' JWT (token login) tidak ditemukan. Verifikasi tidak bisa dilanjutkan.');
         return false;
     }
-    // <<< AKHIR PENAMBAHAN >>>
 
     log(chalk.blue(`Mencoba verifikasi task untuk TX: ${txHash.slice(0,10)}...`));
     const url = `${API_BASE_URL}/task/verify?address=${walletAddress}&task_id=${TASK_ID_INTERACTION}&tx_hash=${txHash}`;
 
     for (let attempt = 1; attempt <= 5; attempt++) {
         try {
-            const response = await axios.post(url, {}, { headers: { 'Authorization': `Bearer ${jwt}`, 'User-Agent': randomUseragent.getRandom() } });
+            const response = await axios.post(url, {}, { headers: createApiHeaders(jwt) }); // Menggunakan header lengkap
             const data = response.data;
             if (data.code === 0 && data.data && data.data.verified) {
                 log(chalk.green(`✔️  Task berhasil diverifikasi untuk TX: ${txHash.slice(0,10)}!`));
@@ -119,9 +130,11 @@ const apiVerifyTask = async (walletAddress, jwt, txHash) => {
     return false;
 };
 
+
 // =============================================================================
-// 4. KELAS UTAMA BOT
+// 4. KELAS UTAMA BOT & 5. EKSEKUSI
 // =============================================================================
+// (Tidak ada perubahan sama sekali di bagian Class dan Main)
 
 class FaroswapBot {
     constructor(rpcUrl) {
@@ -243,7 +256,10 @@ class FaroswapBot {
         if (!amountADecimal || parseFloat(amountADecimal) <= 0) return false;
 
         const balanceA = await this.getTokenBalance(wallet.address, tokenAAddress);
-        if (parseFloat(balanceA) < parseFloat(amountADecimal)) return false;
+        if (parseFloat(balanceA) < parseFloat(amountADecimal)) {
+            log(chalk.yellow(`Saldo ${tokenATicker} tidak cukup untuk tambah LP.`));
+            return false;
+        }
         
         const tokenAContract = new ethers.Contract(tokenAAddress, ERC20_ABI, this.provider);
         const decimalsA = await tokenAContract.decimals();
@@ -263,7 +279,10 @@ class FaroswapBot {
         log(chalk.yellow(`Dibutuhkan sekitar ${amountBDecimal} ${tokenBTicker}`));
 
         const balanceB = await this.getTokenBalance(wallet.address, tokenBAddress);
-        if (parseFloat(balanceB) < parseFloat(amountBDecimal)) return false;
+        if (parseFloat(balanceB) < parseFloat(amountBDecimal)) {
+            log(chalk.yellow(`Saldo ${tokenBTicker} tidak cukup untuk tambah LP.`));
+            return false;
+        }
 
         if (!await this.approveToken(wallet, ADDRESSES.POOL_ROUTER, tokenAAddress, amountAWei, jwt)) return false;
         if (!await this.approveToken(wallet, ADDRESSES.POOL_ROUTER, tokenBAddress, amountBWei, jwt)) return false;
@@ -354,10 +373,6 @@ class FaroswapBot {
         log(chalk.bold.green(`\n✅ Semua tugas telah selesai.`));
     }
 }
-
-// =============================================================================
-// 5. TITIK MASUK EKSEKUSI
-// =============================================================================
 
 async function main() {
     try {
