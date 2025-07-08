@@ -41,22 +41,83 @@ const ERC20_ABI = [{"type":"function","name":"balanceOf","stateMutability":"view
 const WPHRS_ABI = [...ERC20_ABI, {"type":"function","name":"deposit","stateMutability":"payable","inputs":[],"outputs":[]},{"type":"function","name":"withdraw","stateMutability":"nonpayable","inputs":[{"name":"amount","type":"uint256"}],"outputs":[]}];
 const UNISWAP_V2_ROUTER_ABI = [{"type":"function","name":"getAmountsOut","stateMutability":"view","inputs":[{"name":"amountIn","type":"uint256"},{"name":"path","type":"address[]"},{"name":"fees","type":"uint256[]"}],"outputs":[{"name":"amounts","type":"uint256[]"}]},{"type":"function","name":"addLiquidity","stateMutability":"payable","inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint256"},{"name":"amountADesired","type":"uint256"},{"name":"amountBDesired","type":"uint256"},{"name":"amountAMin","type":"uint256"},{"name":"amountBMin","type":"uint256"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amountA","type":"uint256"},{"name":"amountB","type":"uint256"},{"name":"liquidity","type":"uint256"}]},{"type":"function","name":"swapExactTokensForTokens","stateMutability":"nonpayable","inputs":[{"name":"amountIn","type":"uint256"},{"name":"amountOutMin","type":"uint256"},{"name":"path","type":"address[]"},{"name":"to","type":"address"},{"name":"deadline","type":"uint256"}],"outputs":[{"name":"amounts","type":"uint256[]"}]}];
 
-
 // =============================================================================
 // 3. FUNGSI INTERAKSI API PHAROS
 // =============================================================================
 
 const apiLogin = async (wallet) => {
-    // ... (Fungsi ini tidak berubah)
+    log(chalk.blue('Mencoba login ke API Pharos...'));
+    const signature = await wallet.signMessage(SIGN_MESSAGE_CONTENT);
+    const url = `${API_BASE_URL}/user/login?address=${wallet.address}&signature=${signature}&invite_code=${INVITE_CODE}`;
+    try {
+        const response = await axios.post(url, {}, { headers: { 'User-Agent': randomUseragent.getRandom() } });
+        if (response.data.code === 0 && response.data.data.jwt) {
+            log(chalk.green('Login API sukses!'));
+            return response.data.data.jwt;
+        } else {
+            log(chalk.yellow(`Login API gagal: ${response.data.msg || 'Unknown error'}`));
+            return null;
+        }
+    } catch (error) {
+        log(chalk.red(`Error saat request login API: ${error.message}`));
+        return null;
+    }
 };
+
 const apiClaimFaucet = async (walletAddress, jwt) => {
-    // ... (Fungsi ini tidak berubah)
+    if (!jwt) { return false; }
+    log(chalk.blue('Mencoba klaim faucet...'));
+    const claimUrl = `${API_BASE_URL}/faucet/daily?address=${walletAddress}`;
+    try {
+        const claimResponse = await axios.post(claimUrl, {}, { headers: { 'Authorization': `Bearer ${jwt}`, 'User-Agent': randomUseragent.getRandom() } });
+        if (claimResponse.data.code === 0) {
+            log(chalk.green('Faucet berhasil diklaim!'));
+            return true;
+        } else if (claimResponse.data.msg && (claimResponse.data.msg.toLowerCase().includes("already") || claimResponse.data.msg.toLowerCase().includes("claimed"))) {
+            log(chalk.gray('Faucet hari ini sudah diklaim.'));
+        } else {
+            log(chalk.yellow(`Klaim Faucet: ${claimResponse.data.msg || 'Unknown error'}`));
+        }
+        return false;
+    } catch (error) {
+        log(chalk.red(`Error saat request klaim faucet: ${error.message}`));
+        return false;
+    }
 };
+
 const apiVerifyTask = async (walletAddress, jwt, txHash) => {
-    // ... (Fungsi ini tidak berubah)
+    // <<< LOG YANG LEBIH JELAS DITAMBAHKAN DI SINI >>>
+    if (!jwt) {
+        log(chalk.bgRed.bold(' MELEWATI VERIFIKASI ') + ' JWT (token login) tidak ditemukan. Verifikasi tidak bisa dilanjutkan karena login gagal di awal.');
+        return false;
+    }
+    // <<< AKHIR PENAMBAHAN >>>
+
+    log(chalk.blue(`Mencoba verifikasi task untuk TX: ${txHash.slice(0,10)}...`));
+    const url = `${API_BASE_URL}/task/verify?address=${walletAddress}&task_id=${TASK_ID_INTERACTION}&tx_hash=${txHash}`;
+
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+            const response = await axios.post(url, {}, { headers: { 'Authorization': `Bearer ${jwt}`, 'User-Agent': randomUseragent.getRandom() } });
+            const data = response.data;
+            if (data.code === 0 && data.data && data.data.verified) {
+                log(chalk.green(`✔️  Task berhasil diverifikasi untuk TX: ${txHash.slice(0,10)}!`));
+                return true;
+            }
+            if ((data.msg || '').toLowerCase().includes("already verified")) {
+                log(chalk.gray(`Task untuk TX ini sudah pernah diverifikasi.`));
+                return true;
+            }
+            log(chalk.yellow(`Percobaan verifikasi #${attempt} gagal: ${data.msg}. Mencoba lagi dalam 30 detik...`));
+            await sleep(30000);
+        } catch (error) {
+            log(chalk.red(`Error saat request verifikasi task #${attempt}: ${error.message}`));
+            if (attempt < 5) await sleep(30000);
+        }
+    }
+    log(chalk.red(`Gagal verifikasi task untuk TX ${txHash.slice(0,10)} setelah 5 kali percobaan.`));
+    return false;
 };
-// NOTE: Salin fungsi API dari respons saya sebelumnya jika Anda membutuhkannya di sini.
-// Untuk mempersingkat, saya asumsikan fungsi-fungsi ini sudah ada.
 
 // =============================================================================
 // 4. KELAS UTAMA BOT
@@ -70,8 +131,6 @@ class FaroswapBot {
         this.wphrsContract = new ethers.Contract(ADDRESSES.WPHRS, WPHRS_ABI, this.provider);
     }
     
-    // <<< FUNGSI YANG HILANG SEBELUMNYA SAYA TAMBAHKAN KEMBALI DI SINI >>>
-
     getContractAddress(ticker) {
         return ADDRESSES[ticker];
     }
@@ -100,9 +159,6 @@ class FaroswapBot {
         }
         log(chalk.bold.yellow('---------------------------------'));
     }
-
-    // <<< AKHIR DARI FUNGSI YANG HILANG >>>
-
 
     async waitForReceipt(txHash, jwt, wallet) {
         log(`Menunggu receipt untuk transaksi: ${chalk.yellow(txHash)}`);
@@ -180,7 +236,51 @@ class FaroswapBot {
     }
     
     async performAddLiquidity(wallet, tokenATicker, tokenBTicker, amountADecimal, jwt) {
-        // ... (Fungsi ini disalin kembali sepenuhnya)
+        log(`Memulai Tambah Likuiditas: ${amountADecimal} ${tokenATicker} - ${tokenBTicker}`);
+        const tokenAAddress = this.getContractAddress(tokenATicker);
+        const tokenBAddress = this.getContractAddress(tokenBTicker);
+        
+        if (!amountADecimal || parseFloat(amountADecimal) <= 0) return false;
+
+        const balanceA = await this.getTokenBalance(wallet.address, tokenAAddress);
+        if (parseFloat(balanceA) < parseFloat(amountADecimal)) return false;
+        
+        const tokenAContract = new ethers.Contract(tokenAAddress, ERC20_ABI, this.provider);
+        const decimalsA = await tokenAContract.decimals();
+        const amountAWei = ethers.parseUnits(amountADecimal.toString(), Number(decimalsA));
+
+        let amountBWei;
+        try {
+            const amountsOut = await this.poolContract.getAmountsOut(amountAWei, [tokenAAddress, tokenBAddress], [30]);
+            amountBWei = amountsOut[1];
+        } catch(e) {
+            log(chalk.red(`Gagal menghitung jumlah token B: ${e.message}`)); return false;
+        }
+        
+        const tokenBContract = new ethers.Contract(tokenBAddress, ERC20_ABI, this.provider);
+        const tokenBDecimals = await tokenBContract.decimals();
+        const amountBDecimal = ethers.formatUnits(amountBWei, Number(tokenBDecimals));
+        log(chalk.yellow(`Dibutuhkan sekitar ${amountBDecimal} ${tokenBTicker}`));
+
+        const balanceB = await this.getTokenBalance(wallet.address, tokenBAddress);
+        if (parseFloat(balanceB) < parseFloat(amountBDecimal)) return false;
+
+        if (!await this.approveToken(wallet, ADDRESSES.POOL_ROUTER, tokenAAddress, amountAWei, jwt)) return false;
+        if (!await this.approveToken(wallet, ADDRESSES.POOL_ROUTER, tokenBAddress, amountBWei, jwt)) return false;
+        
+        try {
+            const lpContractWithSigner = this.poolContract.connect(wallet);
+            const deadline = Math.floor(Date.now() / 1000) + 600;
+            const tx = await lpContractWithSigner.addLiquidity(
+                tokenAAddress, tokenBAddress, 30, amountAWei, amountBWei,
+                (amountAWei * 95n) / 100n, (amountBWei * 95n) / 100n,
+                wallet.address, deadline
+            );
+            return await this.waitForReceipt(tx.hash, jwt, wallet) !== null;
+        } catch (e) {
+            log(chalk.red(`Gagal mengirim transaksi add liquidity: ${e.message}`));
+            return false;
+        }
     }
 
     async run() {
@@ -199,7 +299,6 @@ class FaroswapBot {
         log(chalk.bold.magenta('--- Selesai Tahap API ---\n'));
         await sleep(5000);
 
-        // Baris ini sekarang akan berfungsi karena fungsinya sudah ada
         await this.tampilkanSemuaSaldo(wallet.address, "SALDO AWAL");
 
         log(chalk.bold.magenta(`\n--- TAHAP 0: Membungkus ${WRAP_AMOUNT} PHRS menjadi WPHRS ---`));
@@ -230,13 +329,31 @@ class FaroswapBot {
             }
         }
         
-        // ... (Sisa dari fungsi run tetap sama)
-        
+        if (JUMLAH_TAMBAH_LP > 0) {
+            log(chalk.bold(`\n--- Memulai Fase Tambah Likuiditas (${JUMLAH_TAMBAH_LP} kali) ---`));
+            const lpTickers = TICKERS.filter(t => t !== 'WPHRS');
+            for (let i = 0; i < JUMLAH_TAMBAH_LP; i++) {
+                log(chalk.bold(`--- Tambah LP #${i + 1}/${JUMLAH_TAMBAH_LP} ---`));
+                if (lpTickers.length === 0) { log(chalk.red("Tidak ada token lain untuk dipasangkan.")); break; }
+                const tokenA = lpTickers[Math.floor(Math.random() * lpTickers.length)];
+                log(`Memilih pasangan LP: ${tokenA} - WPHRS`);
+                await this.performAddLiquidity(wallet, tokenA, 'WPHRS', ADD_LP_AMOUNTS[tokenA], jwt);
+                if (i < JUMLAH_TAMBAH_LP - 1) await sleep(Math.floor(Math.random() * (JEDA_MAKSIMUM - JEDA_MINIMUM + 1) + JEDA_MINIMUM));
+            }
+        }
+
+        log(chalk.bold.magenta('\n--- TAHAP AKHIR: Membersihkan WPHRS ---'));
+        const wphrsBalance = await this.getTokenBalance(wallet.address, ADDRESSES.WPHRS);
+        if (parseFloat(wphrsBalance) > 0.000001) {
+            await this.performSwap(wallet, "WPHRS", "PHRS", wphrsBalance, jwt);
+        } else {
+            log("Tidak ada WPHRS yang perlu di-unwrap.");
+        }
+
         await this.tampilkanSemuaSaldo(wallet.address, "SALDO AKHIR");
         log(chalk.bold.green(`\n✅ Semua tugas telah selesai.`));
     }
 }
-
 
 // =============================================================================
 // 5. TITIK MASUK EKSEKUSI
